@@ -1,0 +1,15 @@
+# Built binary (at root only, not cmd/bdh/)
+/bdh
+
+# Test binaries
+*.test
+
+# Coverage
+coverage.out
+
+# IDE
+.idea/
+.vscode/
+
+# OS files
+.DS_Store

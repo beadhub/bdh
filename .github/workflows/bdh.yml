@@ -1,0 +1,41 @@
+name: bdh CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          binary=bdh
+          if [ "$GOOS" = "windows" ]; then
+            binary=bdh.exe
+          fi
+          go build -ldflags="-s -w" -o "$binary" ./cmd/bdh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bdh-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: bdh*
+          if-no-files-found: error
