@@ -7,6 +7,15 @@
 # Coverage
 coverage.out
 
+# Workspace config
+.beadhub
+.beadhub-cache/
+.aw/
+
+# Environment
+.env
+.env.*
+
 # IDE
 .idea/
 .vscode/
