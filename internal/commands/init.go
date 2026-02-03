@@ -278,6 +278,24 @@ func suggestAliasForRepo(beadhubURL, repoOrigin, role, apiKey string) (string, e
 	return fmt.Sprintf("%s-%s", resp.NamePrefix, config.RoleToAliasPrefix(role)), nil
 }
 
+func suggestAliasForProject(beadhubURL, projectSlug, role string) (string, error) {
+	c := client.New(beadhubURL)
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+
+	resp, err := c.SuggestAliasPrefixByProject(ctx, &client.SuggestAliasPrefixRequest{ProjectSlug: projectSlug})
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(resp.NamePrefix) == "" {
+		return "", fmt.Errorf("server returned empty name_prefix")
+	}
+	if strings.TrimSpace(role) == "" {
+		return resp.NamePrefix, nil
+	}
+	return fmt.Sprintf("%s-%s", resp.NamePrefix, config.RoleToAliasPrefix(role)), nil
+}
+
 // promptForProjectSlug prompts the user interactively for the project slug.
 func promptForProjectSlug() (string, error) {
 	reader := bufio.NewReader(os.Stdin)
@@ -390,7 +408,19 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 	aliasIsDefaultSuggestion := false
 	if alias == "" {
 		suggestedAlias := fmt.Sprintf("alice-%s", config.RoleToAliasPrefix(role))
-		if serverSuggested, err := suggestAliasForRepo(beadhubURL, repoOrigin, role, apiKeyFromEnv()); err == nil {
+
+		// Try project-based lookup first if --project is provided
+		projectSlugForSuggestion := resolveConfig(initProject, "BEADHUB_PROJECT", "")
+		if projectSlugForSuggestion != "" {
+			if serverSuggested, err := suggestAliasForProject(beadhubURL, projectSlugForSuggestion, role); err == nil {
+				suggestedAlias = serverSuggested
+			} else {
+				var clientErr *client.Error
+				if errors.As(err, &clientErr) && clientErr.StatusCode != 404 {
+					return fmt.Errorf("failed to get alias suggestion: %w", err)
+				}
+			}
+		} else if serverSuggested, err := suggestAliasForRepo(beadhubURL, repoOrigin, role, apiKeyFromEnv()); err == nil {
 			suggestedAlias = serverSuggested
 		} else {
 			var clientErr *client.Error

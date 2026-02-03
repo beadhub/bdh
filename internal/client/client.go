@@ -397,6 +397,28 @@ func (c *Client) SuggestNamePrefix(ctx context.Context, req *SuggestNamePrefixRe
 	return &resp, nil
 }
 
+// SuggestAliasPrefixRequest is the request body for /v1/agents/suggest-alias-prefix.
+type SuggestAliasPrefixRequest struct {
+	ProjectSlug string `json:"project_slug"`
+}
+
+// SuggestAliasPrefixResponse is the response from /v1/agents/suggest-alias-prefix.
+type SuggestAliasPrefixResponse struct {
+	ProjectSlug string  `json:"project_slug"`
+	ProjectID   *string `json:"project_id"`
+	NamePrefix  string  `json:"name_prefix"`
+}
+
+// SuggestAliasPrefixByProject gets the next available name prefix for a project by slug.
+// Returns the next classic name (alice, bob, etc.) not yet used in the project.
+func (c *Client) SuggestAliasPrefixByProject(ctx context.Context, req *SuggestAliasPrefixRequest) (*SuggestAliasPrefixResponse, error) {
+	var resp SuggestAliasPrefixResponse
+	if err := c.post(ctx, "/v1/agents/suggest-alias-prefix", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // InboxRequest is the request parameters for GET /v1/messages/inbox.
 type InboxRequest struct {
 	WorkspaceID   string
