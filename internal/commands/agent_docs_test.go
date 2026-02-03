@@ -142,8 +142,8 @@ func TestInjectAgentDocs_NoFiles(t *testing.T) {
 	if !strings.Contains(contentStr, "bdh ready") {
 		t.Error("Expected created AGENTS.md to contain 'bdh ready'")
 	}
-	if !strings.Contains(contentStr, "bdh :aweb whoami") {
-		t.Error("Expected created AGENTS.md to contain 'bdh :aweb whoami'")
+	if !strings.Contains(contentStr, "bdh :status") {
+		t.Error("Expected created AGENTS.md to contain 'bdh :status'")
 	}
 	if strings.Contains(contentStr, "`bd ") {
 		t.Error("Created AGENTS.md should not contain bd commands")
@@ -173,8 +173,8 @@ func TestInjectAgentDocs_EmptyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read file: %v", err)
 	}
-	if !strings.Contains(string(content), "bdh :aweb whoami") {
-		t.Error("Expected injected content to contain 'bdh :aweb whoami'")
+	if !strings.Contains(string(content), "bdh :status") {
+		t.Error("Expected injected content to contain 'bdh :status'")
 	}
 	if !strings.Contains(string(content), "BeadHub Coordination") {
 		t.Error("Expected injected content to contain 'BeadHub Coordination'")
@@ -206,8 +206,8 @@ func TestInjectAgentDocs_WithBdInstructions(t *testing.T) {
 		t.Fatalf("Failed to read file: %v", err)
 	}
 	contentStr := string(content)
-	if !strings.Contains(contentStr, "bdh :aweb whoami") {
-		t.Error("Expected injected content to contain 'bdh :aweb whoami'")
+	if !strings.Contains(contentStr, "bdh :status") {
+		t.Error("Expected injected content to contain 'bdh :status'")
 	}
 	// bd references should be replaced with bdh
 	if strings.Contains(contentStr, "`bd ready`") {
@@ -330,7 +330,7 @@ func TestInjectAgentDocs_Symlink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read actual file: %v", err)
 	}
-	if !strings.Contains(string(content), "bdh :aweb whoami") {
+	if !strings.Contains(string(content), "bdh :status") {
 		t.Error("Expected injected content in actual file")
 	}
 }
@@ -363,7 +363,7 @@ func TestInjectAgentDocs_BothFiles(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to read %s: %v", path, err)
 		}
-		if !strings.Contains(string(content), "bdh :aweb whoami") {
+		if !strings.Contains(string(content), "bdh :status") {
 			t.Errorf("Expected bdh instructions in %s", path)
 		}
 	}
@@ -695,8 +695,8 @@ func TestInjectPrimeOverride_Integration(t *testing.T) {
 	}
 
 	// Check session commands are present
-	if !strings.Contains(contentStr, "bdh :aweb whoami") {
-		t.Error("Expected bdh :aweb whoami in PRIME.md")
+	if !strings.Contains(contentStr, "bdh :status") {
+		t.Error("Expected bdh :status in PRIME.md")
 	}
 	if !strings.Contains(contentStr, "bdh :policy") {
 		t.Error("Expected bdh :policy in PRIME.md")

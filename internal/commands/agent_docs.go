@@ -15,9 +15,9 @@ const bdhInstructionsContent = `## BeadHub Coordination
 This project uses ` + "`bdh`" + ` for multi-agent coordination. Run ` + "`bdh :policy`" + ` for instructions.
 
 ` + "```bash" + `
-bdh :aweb whoami   # your identity
-bdh :policy        # READ AND FOLLOW
-bdh ready          # find work
+bdh :status    # your identity + team status
+bdh :policy    # READ AND FOLLOW
+bdh ready      # find work
 ` + "```" + `
 `
 
@@ -40,7 +40,7 @@ bdh sync --from-main                   # Sync with main branch
 
 **Start every session:**
 ` + "```bash" + `
-bdh :aweb whoami   # your identity
+bdh :status    # your identity + team status
 bdh :policy        # READ AND FOLLOW
 bdh ready          # find work
 ` + "```" + `
@@ -234,7 +234,7 @@ const primeHeader = `# BeadHub Workspace
 
 **Start every session:**
 ` + "```bash" + `
-bdh :aweb whoami   # your identity
+bdh :status    # your identity + team status
 bdh :policy        # READ AND FOLLOW
 bdh ready          # find work
 ` + "```" + `

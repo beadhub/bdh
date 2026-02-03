@@ -71,6 +71,7 @@ func init() {
 
 	// Add subcommands (all :* commands)
 	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(nextAliasPrefixCmd)
 	rootCmd.AddCommand(escalateCmd)
 	rootCmd.AddCommand(awebCmd)
