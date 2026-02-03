@@ -22,7 +22,7 @@ var (
 )
 
 var addWorktreeCmd = &cobra.Command{
-	Use:   ":add-worktree <role>",
+	Use:   ":add-worktree [role]",
 	Short: "Create an agent worktree (git worktree + bdh :init)",
 	Long: `Create an agent worktree and initialize bdh for multi-agent development.
 
@@ -32,12 +32,14 @@ This command:
 3. Creates a git worktree at ../<repo-name>-<alias>/ on a branch named <alias>
 4. Runs bdh :init in the new worktree with the computed alias
 
-The role should be 1-2 words (e.g., "coord", "backend", "full-stack").
+The role should be 1-2 words (e.g., "coord", "backend", "full-stack"). If omitted,
+bdh will prompt in TTY mode (default: "agent") or use "agent" in non-interactive mode.
 
 Examples:
+  bdh :add-worktree                       # Creates worktree with alias like alice-agent
   bdh :add-worktree coord                 # Creates worktree with alias like alice-coord
   bdh :add-worktree backend --alias bob-backend  # Override default alias`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.RangeArgs(0, 1),
 	RunE: runAddWorktree,
 }
 
@@ -143,7 +145,21 @@ func cleanupWorktree(repoPath, worktreePath, branchName string, deleteBranch boo
 }
 
 func runAddWorktree(cmd *cobra.Command, args []string) error {
-	role := args[0]
+	role := ""
+	if len(args) >= 1 {
+		role = strings.TrimSpace(args[0])
+	}
+	if role == "" {
+		if isTTY() {
+			var err error
+			role, err = promptForRole()
+			if err != nil {
+				return fmt.Errorf("getting role: %w", err)
+			}
+		} else {
+			role = "agent"
+		}
+	}
 
 	// Validate role
 	normalizedRole := config.NormalizeRole(role)
