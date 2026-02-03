@@ -9,20 +9,54 @@ import (
 	"strings"
 )
 
-// Agent docs injection content
+// Agent docs injection content (appended to existing files)
 const bdhInstructionsContent = `## BeadHub Coordination
 
 This project uses ` + "`bdh`" + ` for multi-agent coordination. Run ` + "`bdh :policy`" + ` for instructions.
 
 ` + "```bash" + `
-bdh :status    # your identity
-bdh :policy    # READ AND FOLLOW
-bdh ready      # find work
+bdh :aweb whoami   # your identity
+bdh :policy        # READ AND FOLLOW
+bdh ready          # find work
 ` + "```" + `
 `
 
-const bdhUpgradeNotice = `> **IMPORTANT**: This project uses ` + "`bdh`" + ` (BeadHub) for coordination. Always use ` + "`bdh`" + ` commands instead of ` + "`bd`" + `. The ` + "`bdh`" + ` wrapper coordinates work across agents and syncs with the BeadHub server.
+// Full AGENTS.md template for new files
+const bdhAgentsTemplate = `# Agent Instructions
 
+This project uses ` + "`bdh`" + ` for multi-agent coordination and issue tracking.
+
+## Quick Reference
+
+` + "```bash" + `
+bdh ready                              # Find available work
+bdh show <id>                          # View issue details
+bdh update <id> --status in_progress   # Claim work
+bdh close <id>                         # Complete work
+bdh sync --from-main                   # Sync with main branch
+` + "```" + `
+
+## Session Workflow
+
+**Start every session:**
+` + "```bash" + `
+bdh :aweb whoami   # your identity
+bdh :policy        # READ AND FOLLOW
+bdh ready          # find work
+` + "```" + `
+
+**Before ending session:**
+` + "```bash" + `
+git status && git add <files>
+bdh sync --from-main
+git commit -m "..."
+` + "```" + `
+
+## Communication
+
+- Default to mail (` + "`bdh :aweb mail send <alias> \"message\"`" + `) for async coordination
+- Use chat (` + "`bdh :aweb chat`" + `) when blocked and need immediate response
+- Respond immediately to WAITING notifications
 `
 
 // Markers to detect existing instructions
@@ -38,9 +72,10 @@ var (
 
 // AgentDocsResult contains the result of injecting agent docs.
 type AgentDocsResult struct {
-	Injected []string // Files that were modified
+	Created  []string // Files that were created from scratch
+	Injected []string // Files that were modified (bdh section added)
 	Skipped  []string // Files skipped (already has bdh instructions)
-	Upgraded []string // Files that had bd instructions and got upgrade notice
+	Upgraded []string // Files that had bd instructions replaced with bdh
 	Errors   []string // Files that had errors
 }
 
@@ -144,6 +179,16 @@ func InjectAgentDocs(repoRoot string) (*AgentDocsResult, error) {
 		}
 	}
 
+	// If no files were found or processed, create AGENTS.md from template
+	if len(processedPaths) == 0 {
+		agentsPath := filepath.Join(repoRoot, "AGENTS.md")
+		if err := os.WriteFile(agentsPath, []byte(bdhAgentsTemplate), 0644); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("AGENTS.md: failed to create: %v", err))
+		} else {
+			result.Created = append(result.Created, "AGENTS.md")
+		}
+	}
+
 	return result, nil
 }
 
@@ -159,12 +204,15 @@ func hasBdhInstructions(content string) bool {
 
 // PrintAgentDocsResult prints the result of agent docs injection.
 func PrintAgentDocsResult(result *AgentDocsResult) {
-	if len(result.Injected) == 0 && len(result.Upgraded) == 0 && len(result.Skipped) == 0 && len(result.Errors) == 0 {
+	if len(result.Created) == 0 && len(result.Injected) == 0 && len(result.Upgraded) == 0 && len(result.Skipped) == 0 && len(result.Errors) == 0 {
 		return
 	}
 
 	fmt.Println()
 	fmt.Println("Agent instructions:")
+	for _, f := range result.Created {
+		fmt.Printf("  + Created %s with bdh instructions\n", f)
+	}
 	for _, f := range result.Injected {
 		fmt.Printf("  + Injected bdh instructions into %s\n", f)
 	}
@@ -186,9 +234,9 @@ const primeHeader = `# BeadHub Workspace
 
 **Start every session:**
 ` + "```bash" + `
-bdh :status    # your identity
-bdh :policy    # READ AND FOLLOW
-bdh ready      # find work
+bdh :aweb whoami   # your identity
+bdh :policy        # READ AND FOLLOW
+bdh ready          # find work
 ` + "```" + `
 
 **Before ending session:**
