@@ -113,16 +113,18 @@ func InjectAgentDocs(repoRoot string) (*AgentDocsResult, error) {
 		// Check if bd instructions present (need upgrade notice)
 		needsUpgradeNotice := bdMarkerRegex.MatchString(contentStr)
 
-		// Prepare content to inject
-		var injection string
+		// Prepare content to inject (no upgrade notice needed since we replace bd->bdh)
+		injection := bdhInstructionsContent
+
+		// Apply bd->bdh replacements when bd instructions detected
+		newContent := contentStr
 		if needsUpgradeNotice {
-			injection = bdhUpgradeNotice + bdhInstructionsContent
-		} else {
-			injection = bdhInstructionsContent
+			for _, r := range bdToBdhReplacements {
+				newContent = r.pattern.ReplaceAllString(newContent, r.replacement)
+			}
 		}
 
-		// Append to file
-		newContent := contentStr
+		// Append bdh section
 		if !strings.HasSuffix(newContent, "\n") {
 			newContent += "\n"
 		}

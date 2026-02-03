@@ -186,21 +186,21 @@ func TestInjectAgentDocs_WithBdInstructions(t *testing.T) {
 		t.Errorf("Expected AGENTS.md to be upgraded, got %v", result.Upgraded)
 	}
 
-	// Verify content contains upgrade notice
+	// Verify content has bd->bdh replacements applied
 	content, err := os.ReadFile(agentsPath)
 	if err != nil {
 		t.Fatalf("Failed to read file: %v", err)
 	}
 	contentStr := string(content)
-	if !strings.Contains(contentStr, "IMPORTANT") {
-		t.Error("Expected upgrade notice with 'IMPORTANT'")
-	}
 	if !strings.Contains(contentStr, "bdh :status") {
 		t.Error("Expected injected content to contain 'bdh :status'")
 	}
-	// Original content should be preserved
-	if !strings.Contains(contentStr, "bd ready") {
-		t.Error("Expected original content to be preserved")
+	// bd references should be replaced with bdh
+	if strings.Contains(contentStr, "`bd ready`") {
+		t.Error("Expected `bd ready` to be replaced with `bdh ready`")
+	}
+	if !strings.Contains(contentStr, "`bdh ready`") {
+		t.Error("Expected content to contain `bdh ready` after replacement")
 	}
 }
 
