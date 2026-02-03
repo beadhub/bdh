@@ -9,8 +9,15 @@ import (
 	"strings"
 )
 
+// Markers for bdh-injected content
+const (
+	bdhMarkerStart = "<!-- BEADHUB:START -->"
+	bdhMarkerEnd   = "<!-- BEADHUB:END -->"
+)
+
 // Agent docs injection content (appended to existing files)
-const bdhInstructionsContent = `## BeadHub Coordination
+const bdhInstructionsContent = bdhMarkerStart + `
+## BeadHub Coordination
 
 This project uses ` + "`bdh`" + ` for multi-agent coordination. Run ` + "`bdh :policy`" + ` for instructions.
 
@@ -19,10 +26,11 @@ bdh :status    # your identity + team status
 bdh :policy    # READ AND FOLLOW
 bdh ready      # find work
 ` + "```" + `
-`
+` + bdhMarkerEnd
 
 // Full AGENTS.md template for new files
-const bdhAgentsTemplate = `# Agent Instructions
+const bdhAgentsTemplate = bdhMarkerStart + `
+# Agent Instructions
 
 This project uses ` + "`bdh`" + ` for multi-agent coordination and issue tracking.
 
@@ -57,16 +65,11 @@ git commit -m "..."
 - Default to mail (` + "`bdh :aweb mail send <alias> \"message\"`" + `) for async coordination
 - Use chat (` + "`bdh :aweb chat`" + `) when blocked and need immediate response
 - Respond immediately to WAITING notifications
-`
+` + bdhMarkerEnd
 
 // Markers to detect existing instructions
 var (
-	// bdh instructions already present - check for the injected section header
-	bdhMarkers = []string{
-		"## BeadHub Coordination",
-	}
-
-	// bd instructions present (need upgrade notice) - case insensitive
+	// bd instructions present (need replacement) - case insensitive
 	bdMarkerRegex = regexp.MustCompile(`(?i)\bbd\s+(ready|create|prime|sync|close|update|show|list)\b`)
 )
 
@@ -139,31 +142,32 @@ func InjectAgentDocs(repoRoot string) (*AgentDocsResult, error) {
 
 		contentStr := string(content)
 
-		// Check if bdh instructions already present
-		if hasBdhInstructions(contentStr) {
-			result.Skipped = append(result.Skipped, filename)
-			continue
+		// Remove existing bdh section if present (so we can update it)
+		alreadyHadBdh := hasBdhInstructions(contentStr)
+		if alreadyHadBdh {
+			contentStr = removeBdhSection(contentStr)
 		}
 
-		// Check if bd instructions present (need upgrade notice)
-		needsUpgradeNotice := bdMarkerRegex.MatchString(contentStr)
+		// Check if bd instructions present (need replacement)
+		hasBdInstructions := bdMarkerRegex.MatchString(contentStr)
 
-		// Prepare content to inject (no upgrade notice needed since we replace bd->bdh)
-		injection := bdhInstructionsContent
-
-		// Apply bd->bdh replacements when bd instructions detected
+		// Apply bd->bdh replacements
 		newContent := contentStr
-		if needsUpgradeNotice {
-			for _, r := range bdToBdhReplacements {
-				newContent = r.pattern.ReplaceAllString(newContent, r.replacement)
-			}
+		for _, r := range bdToBdhReplacements {
+			newContent = r.pattern.ReplaceAllString(newContent, r.replacement)
+		}
+
+		// If nothing changed and we already had bdh section, skip
+		if newContent == contentStr && alreadyHadBdh && !hasBdInstructions {
+			result.Skipped = append(result.Skipped, filename)
+			continue
 		}
 
 		// Append bdh section
 		if !strings.HasSuffix(newContent, "\n") {
 			newContent += "\n"
 		}
-		newContent += "\n" + injection
+		newContent += "\n" + bdhInstructionsContent
 
 		// Write back with original permissions
 		if err := os.WriteFile(resolvedPath, []byte(newContent), fileMode); err != nil {
@@ -172,7 +176,7 @@ func InjectAgentDocs(repoRoot string) (*AgentDocsResult, error) {
 		}
 
 		// Track result after successful write
-		if needsUpgradeNotice {
+		if hasBdInstructions {
 			result.Upgraded = append(result.Upgraded, filename)
 		} else {
 			result.Injected = append(result.Injected, filename)
@@ -192,14 +196,38 @@ func InjectAgentDocs(repoRoot string) (*AgentDocsResult, error) {
 	return result, nil
 }
 
-// hasBdhInstructions checks if content already has bdh instructions.
+// hasBdhInstructions checks if content already has bdh instructions (using markers).
 func hasBdhInstructions(content string) bool {
-	for _, marker := range bdhMarkers {
-		if strings.Contains(content, marker) {
-			return true
-		}
+	return strings.Contains(content, bdhMarkerStart)
+}
+
+// removeBdhSection removes the existing bdh section (between markers) from content.
+func removeBdhSection(content string) string {
+	startIdx := strings.Index(content, bdhMarkerStart)
+	if startIdx == -1 {
+		return content
 	}
-	return false
+	endIdx := strings.Index(content, bdhMarkerEnd)
+	if endIdx == -1 {
+		return content
+	}
+	endIdx += len(bdhMarkerEnd)
+
+	// Remove the section and any trailing newlines
+	before := content[:startIdx]
+	after := content[endIdx:]
+
+	// Trim trailing newlines from before and leading newlines from after
+	before = strings.TrimRight(before, "\n")
+	after = strings.TrimLeft(after, "\n")
+
+	if before == "" {
+		return after
+	}
+	if after == "" {
+		return before
+	}
+	return before + "\n\n" + after
 }
 
 // PrintAgentDocsResult prints the result of agent docs injection.

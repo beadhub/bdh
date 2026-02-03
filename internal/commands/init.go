@@ -628,17 +628,19 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 	fmt.Println("  - Open and auto-authenticate: `bdh :dashboard`")
 	fmt.Println("  - Uses the selected account from .aw/context (or BEADHUB_API_KEY override)")
 
+	// Run bd init first if beads database doesn't exist
+	// (this creates AGENTS.md with bd commands that we'll convert to bdh)
+	if needsBeadsInit {
+		runBeadsInit(initResp.APIKey)
+	}
+
 	// Inject bdh instructions into CLAUDE.md/AGENTS.md
+	// (this also replaces any bd->bdh in content added by bd init)
 	wd, _ := os.Getwd()
 	if agentDocsResult, err := InjectAgentDocs(wd); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to inject agent docs: %v\n", err)
 	} else {
 		PrintAgentDocsResult(agentDocsResult)
-	}
-
-	// Run bd init if beads database doesn't exist
-	if needsBeadsInit {
-		runBeadsInit(initResp.APIKey)
 	}
 
 	// Inject PRIME.md override

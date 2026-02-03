@@ -24,8 +24,8 @@ func TestHasBdhInstructions(t *testing.T) {
 			want:    false,
 		},
 		{
-			name:    "has injected section header",
-			content: "# Project\n\n## BeadHub Coordination\n\nSome content.",
+			name:    "has injected section marker",
+			content: "# Project\n\n<!-- BEADHUB:START -->\n## BeadHub Coordination\n\nSome content.\n<!-- BEADHUB:END -->",
 			want:    true,
 		},
 		{
@@ -221,9 +221,9 @@ func TestInjectAgentDocs_WithBdInstructions(t *testing.T) {
 func TestInjectAgentDocs_AlreadyHasBdh(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create CLAUDE.md with bdh instructions already (has injected section header)
+	// Create CLAUDE.md with bdh instructions already (using markers)
 	claudePath := filepath.Join(tmpDir, "CLAUDE.md")
-	originalContent := "# My Project\n\n## BeadHub Coordination\n\nAlready has instructions.\n"
+	originalContent := "# My Project\n\n<!-- BEADHUB:START -->\n## BeadHub Coordination\n\nAlready has instructions.\n<!-- BEADHUB:END -->\n"
 	if err := os.WriteFile(claudePath, []byte(originalContent), 0644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
