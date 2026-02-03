@@ -50,6 +50,54 @@ func TestHasBdhInstructions(t *testing.T) {
 	}
 }
 
+func TestRemoveBdhSection(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "no markers",
+			content: "# Project\n\nSome content.",
+			want:    "# Project\n\nSome content.",
+		},
+		{
+			name:    "markers at end",
+			content: "# Project\n\nSome content.\n\n<!-- BEADHUB:START -->\nBdh stuff\n<!-- BEADHUB:END -->",
+			want:    "# Project\n\nSome content.",
+		},
+		{
+			name:    "markers at start",
+			content: "<!-- BEADHUB:START -->\nBdh stuff\n<!-- BEADHUB:END -->\n\n# Project\n\nSome content.",
+			want:    "# Project\n\nSome content.",
+		},
+		{
+			name:    "markers in middle",
+			content: "# Project\n\n<!-- BEADHUB:START -->\nBdh stuff\n<!-- BEADHUB:END -->\n\nMore content.",
+			want:    "# Project\n\nMore content.",
+		},
+		{
+			name:    "only markers",
+			content: "<!-- BEADHUB:START -->\nBdh stuff\n<!-- BEADHUB:END -->",
+			want:    "",
+		},
+		{
+			name:    "start marker only (malformed)",
+			content: "# Project\n\n<!-- BEADHUB:START -->\nBdh stuff",
+			want:    "# Project\n\n<!-- BEADHUB:START -->\nBdh stuff",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := removeBdhSection(tt.content)
+			if got != tt.want {
+				t.Errorf("removeBdhSection() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBdMarkerRegex(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -287,6 +335,16 @@ func TestInjectAgentDocs_Idempotent(t *testing.T) {
 	content2, _ := os.ReadFile(claudePath)
 	if string(content1) != string(content2) {
 		t.Error("Content should not change on second injection")
+	}
+
+	// Verify there's exactly one marker pair
+	markerCount := strings.Count(string(content2), "<!-- BEADHUB:START -->")
+	if markerCount != 1 {
+		t.Errorf("Expected exactly 1 BEADHUB:START marker, got %d", markerCount)
+	}
+	endMarkerCount := strings.Count(string(content2), "<!-- BEADHUB:END -->")
+	if endMarkerCount != 1 {
+		t.Errorf("Expected exactly 1 BEADHUB:END marker, got %d", endMarkerCount)
 	}
 }
 
@@ -536,6 +594,26 @@ func TestBdToBdhReplacements(t *testing.T) {
 			name:  "prefer bd with comma",
 			input: "prefer bd, it's better",
 			want:  "prefer bdh, it's better",
+		},
+		{
+			name:  "should not replace lombdorg",
+			input: "This project uses lombdorg for something.",
+			want:  "This project uses lombdorg for something.",
+		},
+		{
+			name:  "should not replace bdfoo",
+			input: "The bdfoo library is also used.",
+			want:  "The bdfoo library is also used.",
+		},
+		{
+			name:  "should not replace abduct",
+			input: "Some text like abduct should not change.",
+			want:  "Some text like abduct should not change.",
+		},
+		{
+			name:  "mixed lombdorg and bd commands",
+			input: "This uses lombdorg. Run `bd ready` to start.",
+			want:  "This uses lombdorg. Run `bdh ready` to start.",
 		},
 	}
 
