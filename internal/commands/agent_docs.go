@@ -34,6 +34,7 @@ bdh --help     # command reference
 - Default to mail (` + "`bdh :aweb mail send <alias> \"message\"`" + `); use chat (` + "`bdh :aweb chat`" + `) when blocked
 - Respond immediately to WAITING notifications
 - Prioritize good communication — your goal is for the team to succeed
+- Before saying "done", follow the session close protocol in ` + "`bdh :policy`" + ` (includes ` + "`git push`" + `)
 ` + bdhMarkerEnd
 
 // Full AGENTS.md template for new files
@@ -49,7 +50,7 @@ bdh ready                              # Find available work
 bdh show <id>                          # View issue details
 bdh update <id> --status in_progress   # Claim work
 bdh close <id>                         # Complete work
-bdh sync --from-main                   # Sync with main branch
+bdh sync                               # Sync beads/issues.jsonl with git
 ` + "```" + `
 
 ## Session Workflow
@@ -63,9 +64,12 @@ bdh ready          # find work
 
 **Before ending session:**
 ` + "```bash" + `
-git status && git add <files>
-bdh sync --from-main
+git status
+git add <files>
+bdh sync
 git commit -m "..."
+bdh sync
+git push
 ` + "```" + `
 
 ## Communication
@@ -277,9 +281,12 @@ bdh ready          # find work
 
 **Before ending session:**
 ` + "```bash" + `
-git status && git add <files>
-bdh sync --from-main
+git status
+git add <files>
+bdh sync
 git commit -m "..."
+bdh sync
+git push
 ` + "```" + `
 
 ---

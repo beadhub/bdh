@@ -53,12 +53,12 @@ bdh :aweb locks          # See active file reservations
 
 ```bash
 # Mail (async) — status updates, handoffs, FYIs
-bdh :mail --send alice "Login bug fixed."
-bdh :mail --list
+bdh :aweb mail send alice "Login bug fixed."
+bdh :aweb mail list
 
 # Chat (sync) — when you need an answer to proceed
-bdh :chat alice "Quick question..." --wait 300
-bdh :chat --pending
+bdh :aweb chat send alice "Quick question..." --wait 300
+bdh :aweb chat pending
 ```
 
 ### Escalation
