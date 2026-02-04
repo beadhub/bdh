@@ -16,7 +16,7 @@ func TestFormatNotifications_ShowsWaiting(t *testing.T) {
 	if !strings.Contains(out, "**URGENT**: alice is waiting for your response") {
 		t.Errorf("expected URGENT notification, got: %q", out)
 	}
-	if !strings.Contains(out, "→ Respond now: `bdh :aweb chat --reply alice \"your reply\"`") {
+	if !strings.Contains(out, "→ Respond now: `bdh :aweb chat send alice \"your reply\"`") {
 		t.Errorf("expected response hint, got: %q", out)
 	}
 }

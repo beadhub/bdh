@@ -214,7 +214,7 @@ func FormatNotifications(ctx *NotificationContext, excludeAlias string) string {
 			continue
 		}
 		seen[alias] = struct{}{}
-		lines = append(lines, fmt.Sprintf("- **URGENT**: %s is waiting for your response\n  → Respond now: `bdh :aweb chat --reply %s \"your reply\"`", alias, alias))
+		lines = append(lines, fmt.Sprintf("- **URGENT**: %s is waiting for your response\n  → Respond now: `bdh :aweb chat send %s \"your reply\"`", alias, alias))
 	}
 
 	// CHATS: non-waiting with unread
@@ -225,9 +225,9 @@ func FormatNotifications(ctx *NotificationContext, excludeAlias string) string {
 		}
 	}
 	if nonWaiting == 1 {
-		lines = append(lines, "- **CHAT**: You have 1 unread conversation\n  → Check: `bdh :aweb chat --pending`")
+		lines = append(lines, "- **CHAT**: You have 1 unread conversation\n  → Check: `bdh :aweb chat pending`")
 	} else if nonWaiting > 1 {
-		lines = append(lines, fmt.Sprintf("- **CHAT**: You have %d unread conversations\n  → Check: `bdh :aweb chat --pending`", nonWaiting))
+		lines = append(lines, fmt.Sprintf("- **CHAT**: You have %d unread conversations\n  → Check: `bdh :aweb chat pending`", nonWaiting))
 	}
 
 	// MAIL

@@ -117,8 +117,8 @@ func TestFormatChatOutput_Pending_FromTarget(t *testing.T) {
 	if !strings.Contains(out, "WAITING for your reply") {
 		t.Errorf("expected waiting status, got: %q", out)
 	}
-	if !strings.Contains(out, "--reply bob") {
-		t.Errorf("expected reply hint, got: %q", out)
+	if !strings.Contains(out, "chat send bob") {
+		t.Errorf("expected send hint, got: %q", out)
 	}
 }
 
@@ -203,7 +203,7 @@ func TestFormatPendingOutput_WithWaiting(t *testing.T) {
 	if !strings.Contains(out, "(unread: 3)") {
 		t.Errorf("expected unread count, got: %q", out)
 	}
-	if !strings.Contains(out, "--open alice") {
+	if !strings.Contains(out, "chat open alice") {
 		t.Errorf("expected open hint, got: %q", out)
 	}
 }
@@ -372,10 +372,10 @@ func TestFormatChatOpenOutput_WithMessages(t *testing.T) {
 	if !strings.Contains(out, "---") {
 		t.Errorf("expected separator between messages, got: %q", out)
 	}
-	if !strings.Contains(out, "--reply alice") {
-		t.Errorf("expected reply hint, got: %q", out)
+	if !strings.Contains(out, "chat send alice") {
+		t.Errorf("expected send hint, got: %q", out)
 	}
-	if !strings.Contains(out, "--hang-on") {
+	if !strings.Contains(out, "chat hang-on") {
 		t.Errorf("expected hang-on hint for waiting sender, got: %q", out)
 	}
 }
@@ -426,7 +426,7 @@ func TestFormatChatOpenOutput_NotWaiting(t *testing.T) {
 	if strings.Contains(out, "WAITING") {
 		t.Errorf("should not show WAITING when sender is not waiting, got: %q", out)
 	}
-	if strings.Contains(out, "--hang-on") {
+	if strings.Contains(out, "chat hang-on") {
 		t.Errorf("should not suggest hang-on when not waiting, got: %q", out)
 	}
 }
@@ -500,7 +500,7 @@ func TestFormatPendingOutput_FiltersSelf(t *testing.T) {
 
 	out := formatPendingOutput(result, "me", false)
 	// The open hint should point to alice, not "me"
-	if !strings.Contains(out, "--open alice") {
+	if !strings.Contains(out, "chat open alice") {
 		t.Errorf("expected open hint for alice, got: %q", out)
 	}
 }

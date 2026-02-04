@@ -23,32 +23,19 @@ import (
 const defaultChatWait = 60
 
 var (
+	chatJSON              bool
 	chatWait              int
 	chatStartConversation bool
 	chatLeaveConversation bool
-	chatOpen              bool
-	chatReply             bool
-	chatPending           bool
-	chatHistory           bool
-	chatJSON              bool
-	chatHangOn            bool
 )
 
 var chatCmd = &cobra.Command{
-	Use:   "chat <mode> <agent-name> [message]",
-	Short: "Send a message to another agent in a persistent chat session",
-	Long: `Send a message to another agent in a persistent chat session.
+	Use:   "chat",
+	Short: "Persistent chat sessions",
+	Long: `Persistent chat sessions.
 
 Sessions are persistent per participant set - one session exists forever
 between any pair (or group) of agents. Just send messages, no joining needed.
-
-Modes (choose one):
-  --start-conversation <agent> "msg"   Initiate new exchange (5 min wait)
-  --reply <agent> "msg"                Respond to conversation (60s wait)
-  --leave-conversation <agent> "msg"   Send final message, exit immediately
-  --open <agent>                       Read unread messages (marks as read)
-  --pending                            List conversations with unread messages
-  --history <agent>                    Show conversation history
 
 Agent name supports fuzzy matching:
   1. Exact match
@@ -56,12 +43,23 @@ Agent name supports fuzzy matching:
   3. Unique substring match (e.g., "main" -> "claude-main")
 
 Examples:
-  bdh :aweb chat --start-conversation bob "Can you help with the API design?"
-  bdh :aweb chat --reply bob "Yes, here's my suggestion..."
-  bdh :aweb chat --leave-conversation bob "Thanks, I'm done here."
-  bdh :aweb chat --open bob
-  bdh :aweb chat --pending
-  bdh :aweb chat --history bob`,
+  bdh :aweb chat send bob "Can you help with the API design?" --start-conversation
+  bdh :aweb chat send bob "Yes, here's my suggestion..."
+  bdh :aweb chat send bob "Thanks, I'm done here." --leave-conversation
+  bdh :aweb chat open bob
+  bdh :aweb chat pending
+  bdh :aweb chat history bob`,
+}
+
+var chatSendCmd = &cobra.Command{
+	Use:   "send <alias> <message>",
+	Short: "Send a message in a chat session",
+	Long: `Send a message to one or more agents in a persistent chat session.
+
+By default, waits 60 seconds for a reply. Use --start-conversation for
+a 5-minute wait when initiating a new exchange. Use --leave-conversation
+to send a final message and exit immediately.`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
@@ -74,136 +72,26 @@ Examples:
 			return err
 		}
 
-		baseCtx := cmd.Context()
+		if chatStartConversation && chatLeaveConversation {
+			return fmt.Errorf("--start-conversation and --leave-conversation are mutually exclusive")
+		}
 
-		// Validate mode selection (exactly one required).
-		modeCount := 0
-		if chatOpen {
-			modeCount++
-		}
-		if chatReply {
-			modeCount++
-		}
-		if chatStartConversation {
-			modeCount++
-		}
 		if chatLeaveConversation {
-			modeCount++
-		}
-		if chatPending {
-			modeCount++
-		}
-		if chatHistory {
-			modeCount++
-		}
-		if modeCount == 0 {
-			return fmt.Errorf("chat requires a mode: use --start-conversation, --reply, --leave-conversation, --open, --pending, or --history")
-		}
-		if modeCount > 1 {
-			return fmt.Errorf("choose only one mode: --start-conversation, --reply, --leave-conversation, --open, --pending, or --history")
-		}
-
-		// Handle --pending
-		if chatPending {
-			if len(args) != 0 {
-				return fmt.Errorf("--pending takes no arguments")
-			}
-			aw, err := newAwebClientRequired(cfg.BeadhubURL)
-			if err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(baseCtx, apiTimeout)
-			defer cancel()
-
-			result, err := chat.Pending(ctx, aw)
-			if err != nil {
-				return err
-			}
-			fmt.Print(formatPendingOutput(result, cfg.Alias, chatJSON))
-			return nil
-		}
-
-		// Handle --history
-		if chatHistory {
-			if len(args) != 1 {
-				return fmt.Errorf("--history requires exactly 1 target agent")
-			}
-			targetAgent, err := resolveTargetAlias(baseCtx, cfg, args[0])
-			if err != nil {
-				return err
-			}
-			SetExcludeChatAlias(targetAgent)
-
-			aw, err := newAwebClientRequired(cfg.BeadhubURL)
-			if err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(baseCtx, apiTimeout)
-			defer cancel()
-
-			result, err := chat.History(ctx, aw, targetAgent)
-			if err != nil {
-				return err
-			}
-			fmt.Print(formatHistoryOutput(result, chatJSON))
-			return nil
-		}
-
-		// Handle --open
-		if chatOpen {
-			if len(args) != 1 {
-				return fmt.Errorf("--open requires exactly 1 target agent")
-			}
-			targetAgent, err := resolveTargetAlias(baseCtx, cfg, args[0])
-			if err != nil {
-				return err
-			}
-			SetExcludeChatAlias(targetAgent)
-
-			aw, err := newAwebClientRequired(cfg.BeadhubURL)
-			if err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(baseCtx, apiTimeout)
-			defer cancel()
-
-			result, err := chat.Open(ctx, aw, targetAgent)
-			if err != nil {
-				return err
-			}
-			fmt.Print(formatChatOpenOutput(result, chatJSON))
-			return nil
-		}
-
-		// --start-conversation, --reply, --leave-conversation all send a message
-		var modeName string
-		if chatStartConversation {
-			modeName = "--start-conversation"
-		} else if chatLeaveConversation {
-			modeName = "--leave-conversation"
 			if cmd.Flags().Changed("wait") && chatWait != 0 {
 				return fmt.Errorf("--leave-conversation cannot be combined with --wait (it always exits immediately)")
 			}
 			chatWait = 0
-		} else if chatReply {
-			modeName = "--reply"
-		}
-
-		if modeName == "" {
-			return fmt.Errorf("unexpected state: no mode matched")
 		}
 
 		if chatStartConversation && cmd.Flags().Changed("wait") && chatWait == 0 {
 			return fmt.Errorf("--start-conversation cannot be combined with --wait 0 (it is meant to wait for a reply)")
 		}
 
-		if len(args) != 2 {
-			return fmt.Errorf("%s requires exactly 2 args: <agent-name> <message>", modeName)
-		}
 		if strings.TrimSpace(args[1]) == "" {
 			return fmt.Errorf("message cannot be empty")
 		}
 
+		baseCtx := cmd.Context()
 		targetAgents, err := resolveTargetAliases(baseCtx, cfg, args[0])
 		if err != nil {
 			return err
@@ -212,27 +100,6 @@ Examples:
 			SetExcludeChatAlias(t)
 		}
 
-		// Handle --hang-on (single target only)
-		if chatHangOn {
-			if len(targetAgents) > 1 {
-				return fmt.Errorf("--hang-on requires a single target agent")
-			}
-			aw, err := newAwebClientRequired(cfg.BeadhubURL)
-			if err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(baseCtx, apiTimeout)
-			defer cancel()
-
-			result, err := chat.HangOn(ctx, aw, targetAgents[0], args[1])
-			if err != nil {
-				return err
-			}
-			fmt.Print(formatHangOnOutput(result, chatJSON))
-			return nil
-		}
-
-		// Send message via chat/ protocol package
 		aw, err := newAwebClientRequired(cfg.BeadhubURL)
 		if err != nil {
 			return err
@@ -266,16 +133,171 @@ Examples:
 	},
 }
 
+var chatPendingCmd = &cobra.Command{
+	Use:   "pending",
+	Short: "List conversations with unread messages",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("invalid .beadhub config: %w", err)
+		}
+		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
+			return err
+		}
+
+		aw, err := newAwebClientRequired(cfg.BeadhubURL)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(cmd.Context(), apiTimeout)
+		defer cancel()
+
+		result, err := chat.Pending(ctx, aw)
+		if err != nil {
+			return err
+		}
+		fmt.Print(formatPendingOutput(result, cfg.Alias, chatJSON))
+		return nil
+	},
+}
+
+var chatOpenCmd = &cobra.Command{
+	Use:   "open <alias>",
+	Short: "Read unread messages and mark as read",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("invalid .beadhub config: %w", err)
+		}
+		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
+			return err
+		}
+
+		baseCtx := cmd.Context()
+		targetAgent, err := resolveTargetAlias(baseCtx, cfg, args[0])
+		if err != nil {
+			return err
+		}
+		SetExcludeChatAlias(targetAgent)
+
+		aw, err := newAwebClientRequired(cfg.BeadhubURL)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(baseCtx, apiTimeout)
+		defer cancel()
+
+		result, err := chat.Open(ctx, aw, targetAgent)
+		if err != nil {
+			return err
+		}
+		fmt.Print(formatChatOpenOutput(result, chatJSON))
+		return nil
+	},
+}
+
+var chatHistoryCmd = &cobra.Command{
+	Use:   "history <alias>",
+	Short: "Show conversation history",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("invalid .beadhub config: %w", err)
+		}
+		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
+			return err
+		}
+
+		baseCtx := cmd.Context()
+		targetAgent, err := resolveTargetAlias(baseCtx, cfg, args[0])
+		if err != nil {
+			return err
+		}
+		SetExcludeChatAlias(targetAgent)
+
+		aw, err := newAwebClientRequired(cfg.BeadhubURL)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(baseCtx, apiTimeout)
+		defer cancel()
+
+		result, err := chat.History(ctx, aw, targetAgent)
+		if err != nil {
+			return err
+		}
+		fmt.Print(formatHistoryOutput(result, chatJSON))
+		return nil
+	},
+}
+
+var chatHangOnCmd = &cobra.Command{
+	Use:   "hang-on <alias> <message>",
+	Short: "Request more time before replying",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("invalid .beadhub config: %w", err)
+		}
+		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
+			return err
+		}
+
+		if strings.TrimSpace(args[1]) == "" {
+			return fmt.Errorf("message cannot be empty")
+		}
+
+		baseCtx := cmd.Context()
+		targetAgent, err := resolveTargetAlias(baseCtx, cfg, args[0])
+		if err != nil {
+			return err
+		}
+		SetExcludeChatAlias(targetAgent)
+
+		aw, err := newAwebClientRequired(cfg.BeadhubURL)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(baseCtx, apiTimeout)
+		defer cancel()
+
+		result, err := chat.HangOn(ctx, aw, targetAgent, args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Print(formatHangOnOutput(result, chatJSON))
+		return nil
+	},
+}
+
 func init() {
-	chatCmd.Flags().IntVar(&chatWait, "wait", defaultChatWait, "Timeout in seconds (0 to not wait)")
-	chatCmd.Flags().BoolVar(&chatStartConversation, "start-conversation", false, "Initiating a new exchange (5 min wait, ignore if target previously left)")
-	chatCmd.Flags().BoolVar(&chatLeaveConversation, "leave-conversation", false, "Send final message and exit (no wait)")
-	chatCmd.Flags().BoolVar(&chatOpen, "open", false, "Read unread messages (marks as read)")
-	chatCmd.Flags().BoolVar(&chatReply, "reply", false, "Respond to a conversation (use with <agent> <message>)")
-	chatCmd.Flags().BoolVar(&chatPending, "pending", false, "List conversations with unread messages")
-	chatCmd.Flags().BoolVar(&chatHistory, "history", false, "Show conversation history")
-	chatCmd.Flags().BoolVar(&chatJSON, "json", false, "Output in JSON format")
-	chatCmd.Flags().BoolVar(&chatHangOn, "hang-on", false, "Request more time before replying (recipient continues waiting)")
+	chatCmd.AddCommand(chatSendCmd)
+	chatCmd.AddCommand(chatPendingCmd)
+	chatCmd.AddCommand(chatOpenCmd)
+	chatCmd.AddCommand(chatHistoryCmd)
+	chatCmd.AddCommand(chatHangOnCmd)
+
+	chatCmd.PersistentFlags().BoolVar(&chatJSON, "json", false, "Output in JSON format")
+
+	chatSendCmd.Flags().IntVar(&chatWait, "wait", defaultChatWait, "Timeout in seconds (0 to not wait)")
+	chatSendCmd.Flags().BoolVar(&chatStartConversation, "start-conversation", false, "Initiate a new exchange (5 min wait)")
+	chatSendCmd.Flags().BoolVar(&chatLeaveConversation, "leave-conversation", false, "Send final message and exit (no wait)")
 }
 
 // resolveTargetAlias resolves a single alias with fuzzy matching and prevents self-chat.
@@ -387,7 +409,7 @@ func formatChatOutput(result *chat.SendResult, asJSON bool) string {
 				sb.WriteString("Status: WAITING for your reply\n")
 			}
 			sb.WriteString(fmt.Sprintf("Body: %s\n", result.Reply))
-			sb.WriteString(fmt.Sprintf("Next: Run \"bdh :aweb chat --reply %s \\\"your reply\\\"\"\n", result.TargetAgent))
+			sb.WriteString(fmt.Sprintf("Next: Run \"bdh :aweb chat send %s \\\"your reply\\\"\"\n", result.TargetAgent))
 		} else {
 			writeChatLine("Chat to", result.TargetAgent, firstTimestamp)
 			sb.WriteString(fmt.Sprintf("Body: %s\n", result.Reply))
@@ -408,7 +430,7 @@ func formatChatOutput(result *chat.SendResult, asJSON bool) string {
 	case "targets_left":
 		sb.WriteString(fmt.Sprintf("Message sent to %s\n", result.TargetAgent))
 		sb.WriteString(fmt.Sprintf("%s previously left the conversation.\n", result.TargetAgent))
-		sb.WriteString(fmt.Sprintf("To start a new exchange, run: \"bdh :aweb chat --start-conversation %s \\\"message\\\"\"\n", result.TargetAgent))
+		sb.WriteString(fmt.Sprintf("To start a new exchange, run: \"bdh :aweb chat send %s \\\"message\\\" --start-conversation\"\n", result.TargetAgent))
 		return sb.String()
 	}
 
@@ -491,7 +513,7 @@ func formatPendingOutput(result *chat.PendingResult, selfAlias string, asJSON bo
 		}
 		openHint := ""
 		if openTarget != "" {
-			openHint = fmt.Sprintf(" — Run \"bdh :aweb chat --open %s\"", openTarget)
+			openHint = fmt.Sprintf(" — Run \"bdh :aweb chat open %s\"", openTarget)
 		}
 
 		if p.SenderWaiting {
@@ -581,9 +603,9 @@ func formatChatOpenOutput(result *chat.OpenResult, asJSON bool) string {
 		sb.WriteString(fmt.Sprintf("\nNote: %s's wait extended by %d min — you have time to respond\n", result.TargetAgent, minutes))
 	}
 
-	sb.WriteString(fmt.Sprintf("\nNext: Run \"bdh :aweb chat --reply %s \\\"your reply\\\"\"", result.TargetAgent))
+	sb.WriteString(fmt.Sprintf("\nNext: Run \"bdh :aweb chat send %s \\\"your reply\\\"\"", result.TargetAgent))
 	if result.SenderWaiting {
-		sb.WriteString(" or --hang-on for more time")
+		sb.WriteString(fmt.Sprintf(" or \"bdh :aweb chat hang-on %s \\\"message\\\"\"", result.TargetAgent))
 	}
 	sb.WriteString("\n")
 
