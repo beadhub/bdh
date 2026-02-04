@@ -19,13 +19,21 @@ const (
 const bdhInstructionsContent = bdhMarkerStart + `
 ## BeadHub Coordination
 
-This project uses ` + "`bdh`" + ` for multi-agent coordination. Run ` + "`bdh :policy`" + ` for instructions.
+This project uses ` + "`bdh`" + ` for multi-agent coordination and issue tracking.
 
+**Start every session:**
 ` + "```bash" + `
+bdh :policy    # READ CAREFULLY and follow diligently, start here now
 bdh :status    # your identity + team status
-bdh :policy    # READ AND FOLLOW
-bdh ready      # find work
+bdh ready      # find unblocked work
+bdh --help     # command reference
 ` + "```" + `
+
+**Key rules:**
+- Use ` + "`bdh`" + ` (not ` + "`bd`" + `) so work is coordinated
+- Default to mail (` + "`bdh :aweb mail send <alias> \"message\"`" + `); use chat (` + "`bdh :aweb chat`" + `) when blocked
+- Respond immediately to WAITING notifications
+- Prioritize good communication — your goal is for the team to succeed
 ` + bdhMarkerEnd
 
 // Full AGENTS.md template for new files
@@ -63,7 +71,7 @@ git commit -m "..."
 ## Communication
 
 - Default to mail (` + "`bdh :aweb mail send <alias> \"message\"`" + `) for async coordination
-- Use chat (` + "`bdh :aweb chat`" + `) when blocked and need immediate response
+- Use chat (` + "`bdh :aweb chat send <alias> \"message\" --start-conversation`" + `) when blocked and need immediate response
 - Respond immediately to WAITING notifications
 ` + bdhMarkerEnd
 
