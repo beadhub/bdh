@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -16,14 +17,15 @@ var notifyCmd = &cobra.Command{
 	Short: "Check for pending chat notifications (for hooks)",
 	Long: `Check for pending chat notifications.
 
-Silent if no pending chats; outputs prominently if there are messages waiting.
-Designed for use in Claude Code hooks after every tool call.
+Silent if no pending chats; outputs JSON with additionalContext if there are
+messages waiting. The JSON format is designed for Claude Code PostToolUse hooks
+so the notification is surfaced to the agent.
 
-Example hook configuration in ~/.claude/settings.json:
+Example hook configuration in .claude/settings.json:
   "hooks": {
     "PostToolUse": [{
-      "type": "command",
-      "command": "bdh :notify"
+      "matcher": ".*",
+      "hooks": [{"type": "command", "command": "bdh :notify"}]
     }]
   }`,
 	RunE: runNotify,
@@ -56,9 +58,10 @@ func runNotify(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Format output prominently
+	// Format output for Claude Code hook (JSON with additionalContext)
 	output := formatNotifyOutput(result, cfg.Alias)
-	fmt.Print(output)
+	hookOutput := formatHookOutput(output)
+	fmt.Print(hookOutput)
 	return nil
 }
 
@@ -125,4 +128,17 @@ func padLine(line string, width int) string {
 		return line[:width]
 	}
 	return line + strings.Repeat(" ", width-visible)
+}
+
+// formatHookOutput wraps the notification in Claude Code hook JSON format.
+// This ensures the output is surfaced to the agent via additionalContext.
+func formatHookOutput(content string) string {
+	output := map[string]interface{}{
+		"hookSpecificOutput": map[string]interface{}{
+			"hookEventName":     "PostToolUse",
+			"additionalContext": content,
+		},
+	}
+	data, _ := json.Marshal(output)
+	return string(data)
 }
