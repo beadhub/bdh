@@ -117,11 +117,10 @@ func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
 		Role:  cfg.Role,
 	}
 
-	// Fetch team workspaces with claims
-	includeClaims := true
+	// Fetch all project workspaces with claims
 	includePresence := true
-	teamResp, err := c.TeamWorkspaces(ctx, &client.TeamWorkspacesRequest{
-		IncludeClaims:   &includeClaims,
+	teamResp, err := c.Workspaces(ctx, &client.WorkspacesRequest{
+		IncludeClaims:   true,
 		IncludePresence: &includePresence,
 		Limit:           defaultStatusTeamLimit,
 	})
