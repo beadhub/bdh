@@ -130,14 +130,6 @@ func Execute() error {
 		return rootCmd.Execute()
 	}
 
-	// --:help: show only bdh help (no bd help)
-	if firstArg == "--:help" {
-		_ = rootCmd.Help()
-		fmt.Println("\nAll bd commands are also available (e.g., bdh ready, bdh create, bdh close).")
-		fmt.Println("Run 'bdh --help' to see the full list.")
-		return nil
-	}
-
 	// Help: show bdh help, then bd help
 	if firstArg == "-h" || firstArg == "--help" {
 		_ = rootCmd.Help()
