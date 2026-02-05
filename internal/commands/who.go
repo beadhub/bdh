@@ -265,12 +265,24 @@ func formatWhoOutput(result *WhoResult, asJSON bool) string {
 	for _, ws := range result.Workspaces {
 		timeAgo := formatTimeAgo(ws.LastSeen)
 		sb.WriteString(fmt.Sprintf("  %s (%s)\n", ws.Alias, ws.HumanName))
+
+		// Show repo/branch if available
+		repoName := strings.TrimSpace(ws.FocusApexRepoName)
+		branch := strings.TrimSpace(ws.FocusApexBranch)
+		if repoName != "" {
+			if branch != "" && branch != "main" && branch != "master" {
+				sb.WriteString(fmt.Sprintf("    Repo: %s (%s)\n", repoName, branch))
+			} else {
+				sb.WriteString(fmt.Sprintf("    Repo: %s\n", repoName))
+			}
+		}
+
 		apexID := strings.TrimSpace(ws.ApexID)
 		apexTitle := strings.TrimSpace(ws.ApexTitle)
 		if apexID != "" {
 			prefix := "    Working on: "
 			if ws.ApexType == "epic" {
-				prefix = "    Working on epic: "
+				prefix = "    Epic: "
 			}
 			if apexTitle != "" {
 				sb.WriteString(fmt.Sprintf("%s%s %s\n", prefix, apexID, apexTitle))
@@ -280,11 +292,16 @@ func formatWhoOutput(result *WhoResult, asJSON bool) string {
 		} else if len(ws.Claims) == 0 {
 			focusID := strings.TrimSpace(ws.FocusApexID)
 			focusTitle := strings.TrimSpace(ws.FocusApexTitle)
+			focusType := strings.TrimSpace(ws.FocusApexType)
 			if focusID != "" {
+				prefix := "    Recent focus: "
+				if focusType == "epic" {
+					prefix = "    Recent epic: "
+				}
 				if focusTitle != "" {
-					sb.WriteString(fmt.Sprintf("    Recent focus: %s %s\n", focusID, focusTitle))
+					sb.WriteString(fmt.Sprintf("%s%s %s\n", prefix, focusID, focusTitle))
 				} else {
-					sb.WriteString(fmt.Sprintf("    Recent focus: %s\n", focusID))
+					sb.WriteString(fmt.Sprintf("%s%s\n", prefix, focusID))
 				}
 			}
 		}
