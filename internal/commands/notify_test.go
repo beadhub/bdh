@@ -60,8 +60,8 @@ func TestFormatNotifyOutput_RegularChat(t *testing.T) {
 
 	output := formatNotifyOutput(result, "my-alias")
 
-	if !strings.Contains(output, "Unread chat") {
-		t.Errorf("Expected 'Unread chat' in output, got: %s", output)
+	if !strings.Contains(output, "Unread message") {
+		t.Errorf("Expected 'Unread message' in output, got: %s", output)
 	}
 	if !strings.Contains(output, "alice") {
 		t.Errorf("Expected alice in output, got: %s", output)

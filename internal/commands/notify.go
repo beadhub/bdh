@@ -94,7 +94,7 @@ func formatNotifyOutput(result *chat.PendingResult, selfAlias string) string {
 
 	sb.WriteString("\n")
 	sb.WriteString("╔══════════════════════════════════════════════════════════════╗\n")
-	sb.WriteString("║                    📬 CHAT NOTIFICATIONS                     ║\n")
+	sb.WriteString("║         📬 AGENT: YOU HAVE PENDING CHAT MESSAGES             ║\n")
 	sb.WriteString("╠══════════════════════════════════════════════════════════════╣\n")
 
 	for _, from := range urgent {
@@ -104,13 +104,13 @@ func formatNotifyOutput(result *chat.PendingResult, selfAlias string) string {
 	}
 
 	for _, from := range regular {
-		line := fmt.Sprintf("║ 💬 Unread chat from %s", from)
+		line := fmt.Sprintf("║ 💬 Unread message from %s", from)
 		sb.WriteString(padLine(line, 65))
 		sb.WriteString("║\n")
 	}
 
 	sb.WriteString("╠══════════════════════════════════════════════════════════════╣\n")
-	sb.WriteString("║ Run: bdh :aweb chat pending                                  ║\n")
+	sb.WriteString("║ YOU MUST RUN: bdh :aweb chat pending                         ║\n")
 	sb.WriteString("╚══════════════════════════════════════════════════════════════╝\n")
 	sb.WriteString("\n")
 
