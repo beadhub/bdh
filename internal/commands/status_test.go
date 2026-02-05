@@ -294,8 +294,8 @@ func TestFormatStatusOutput_TeamMemberReservationsTruncated(t *testing.T) {
 
 	output := formatStatusOutput(result, false)
 
-	// Should show first 10 (defaultStatusTeamReservationsMax) and then "...5 more"
-	if !strings.Contains(output, "...5 more") {
+	// Should show first 5 (defaultStatusTeamReservationsMax) and then "...10 more"
+	if !strings.Contains(output, "...10 more") {
 		t.Errorf("output should indicate truncation, got:\n%s", output)
 	}
 }
