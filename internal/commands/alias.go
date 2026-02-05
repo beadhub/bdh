@@ -71,7 +71,7 @@ func resolveAlias(ctx context.Context, cfg *config.Config, httpClient *client.Cl
 	includePresence := false
 	resp, err := httpClient.Workspaces(ctx, &client.WorkspacesRequest{
 		IncludePresence: &includePresence,
-		Limit:           defaultWhoMaxLimit, // Get all workspaces for matching
+		Limit:           maxWorkspaceQueryLimit, // Get all workspaces for matching
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fetching workspaces: %w", err)

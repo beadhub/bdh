@@ -54,18 +54,17 @@ type LockSummary struct {
 
 // TeamMemberInfo contains information about a team member.
 type TeamMemberInfo struct {
-	Alias             string        `json:"alias"`
-	Role              string        `json:"role,omitempty"`
-	Status            string        `json:"status"`
-	LastSeen          string        `json:"last_seen"`
-	RepoName          string        `json:"repo_name,omitempty"`
-	Branch            string        `json:"branch,omitempty"`
-	ApexID            string        `json:"apex_id,omitempty"`
-	ApexTitle         string        `json:"apex_title,omitempty"`
-	ApexType          string        `json:"apex_type,omitempty"`
-	Claims            []ClaimInfo   `json:"claims,omitempty"`
-	Locks             []LockSummary `json:"locks,omitempty"`
-	IsYou             bool          `json:"is_you,omitempty"`
+	Alias     string        `json:"alias"`
+	Role      string        `json:"role,omitempty"`
+	Status    string        `json:"status"`
+	LastSeen  string        `json:"last_seen"`
+	RepoName  string        `json:"repo_name,omitempty"`
+	Branch    string        `json:"branch,omitempty"`
+	ApexID    string        `json:"apex_id,omitempty"`
+	ApexTitle string        `json:"apex_title,omitempty"`
+	ApexType  string        `json:"apex_type,omitempty"`
+	Claims    []ClaimInfo   `json:"claims,omitempty"`
+	Locks     []LockSummary `json:"locks,omitempty"`
 }
 
 // StatusResult contains the result of the status command.
@@ -124,7 +123,7 @@ func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
 	teamResp, err := c.TeamWorkspaces(ctx, &client.TeamWorkspacesRequest{
 		IncludeClaims:   &includeClaims,
 		IncludePresence: &includePresence,
-		Limit:           50,
+		Limit:           defaultStatusTeamLimit,
 	})
 	if err != nil {
 		var clientErr *client.Error
@@ -173,6 +172,7 @@ func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
 		if isYou {
 			result.YourClaims = claims
 			result.YourLocks = locks
+			continue // Don't add self to team list - shown in "You" section
 		}
 
 		result.Team = append(result.Team, TeamMemberInfo{
@@ -187,7 +187,6 @@ func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
 			ApexType:  ws.ApexType,
 			Claims:    claims,
 			Locks:     locks,
-			IsYou:     isYou,
 		})
 	}
 
@@ -241,20 +240,16 @@ func formatStatusOutput(result *StatusResult, asJSON bool) string {
 		}
 	}
 
-	// Team
+	// Team (other members, not you)
 	sb.WriteString("\n## Team\n")
 	if len(result.Team) == 0 {
-		sb.WriteString("No team members found.\n")
+		sb.WriteString("No other team members.\n")
 	} else {
 		for _, member := range result.Team {
 			timeAgo := formatTimeAgo(member.LastSeen)
-			youIndicator := ""
-			if member.IsYou {
-				youIndicator = " (you)"
-			}
 
 			// Header line: alias — role — status — time
-			sb.WriteString(fmt.Sprintf("- **%s**%s", member.Alias, youIndicator))
+			sb.WriteString(fmt.Sprintf("- **%s**", member.Alias))
 			if member.Role != "" {
 				sb.WriteString(fmt.Sprintf(" — %s", member.Role))
 			}
@@ -286,8 +281,8 @@ func formatStatusOutput(result *StatusResult, asJSON bool) string {
 				}
 			}
 
-			// Claims (skip for "you" since shown above)
-			if !member.IsYou && len(member.Claims) > 0 {
+			// Claims
+			if len(member.Claims) > 0 {
 				sb.WriteString("  Claims:\n")
 				for _, claim := range member.Claims {
 					claimAge := formatTimeAgo(claim.ClaimedAt)
@@ -303,12 +298,12 @@ func formatStatusOutput(result *StatusResult, asJSON bool) string {
 				}
 			}
 
-			// Reservations (skip for "you" since shown above)
-			if !member.IsYou && len(member.Locks) > 0 {
+			// Reservations
+			if len(member.Locks) > 0 {
 				sb.WriteString("  Reservations:\n")
 				for i, lock := range member.Locks {
-					if i >= 3 {
-						sb.WriteString(fmt.Sprintf("    ...%d more\n", len(member.Locks)-3))
+					if i >= defaultStatusTeamReservationsMax {
+						sb.WriteString(fmt.Sprintf("    ...%d more\n", len(member.Locks)-defaultStatusTeamReservationsMax))
 						break
 					}
 					expiresIn := formatDuration(lock.TTLRemainingSeconds)
@@ -324,50 +319,4 @@ func formatStatusOutput(result *StatusResult, asJSON bool) string {
 	}
 
 	return sb.String()
-}
-
-
-// detectAndCleanGoneWorkspaces checks for workspaces registered on this hostname
-// whose paths no longer exist, and deletes them from the server.
-func detectAndCleanGoneWorkspaces(cfg *config.Config) []GoneWorkspace {
-	hostname, err := os.Hostname()
-	if err != nil || hostname == "" {
-		return nil
-	}
-
-	c := newBeadHubClient(cfg.BeadhubURL)
-	ctx := context.Background()
-
-	includePresence := false
-	resp, err := c.Workspaces(ctx, &client.WorkspacesRequest{
-		Hostname:        hostname,
-		IncludePresence: &includePresence,
-	})
-	if err != nil {
-		return nil
-	}
-
-	var goneWorkspaces []GoneWorkspace
-	for _, ws := range resp.Workspaces {
-		if ws.WorkspacePath == "" {
-			continue
-		}
-
-		if ws.WorkspaceID == cfg.WorkspaceID {
-			continue
-		}
-
-		if _, err := os.Stat(ws.WorkspacePath); os.IsNotExist(err) {
-			_, deleteErr := c.DeleteWorkspace(ctx, ws.WorkspaceID)
-			if deleteErr == nil {
-				goneWorkspaces = append(goneWorkspaces, GoneWorkspace{
-					WorkspaceID:   ws.WorkspaceID,
-					Alias:         ws.Alias,
-					WorkspacePath: ws.WorkspacePath,
-				})
-			}
-		}
-	}
-
-	return goneWorkspaces
 }
