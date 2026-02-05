@@ -1,12 +1,10 @@
-// ABOUTME: Implements the :status command showing identity, team status, and escalations.
-// ABOUTME: Combines aweb whoami with beadhub team coordination info.
-
 package commands
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -23,7 +21,7 @@ var statusCmd = &cobra.Command{
 	Long: `Show coordination status for this workspace.
 
 Displays:
-  - Your workspace identity (from aweb)
+  - Your workspace information
   - Other active agents and what they're working on
   - Pending escalations count
 
@@ -37,102 +35,137 @@ func init() {
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "Output as JSON")
 }
 
+// AgentInfo contains information about an agent.
+type AgentInfo struct {
+	Alias        string   `json:"alias"`
+	Member       string   `json:"member,omitempty"`
+	Program      string   `json:"program,omitempty"`
+	Role         string   `json:"role,omitempty"`
+	Status       string   `json:"status"`
+	CurrentLocks []string `json:"current_locks,omitempty"`
+	CurrentIssue string   `json:"current_issue,omitempty"`
+	LastSeen     string   `json:"last_seen"`
+}
+
+// StatusResult contains the result of the status command.
+type StatusResult struct {
+	Agents             []AgentInfo
+	EscalationsPending int
+}
+
 func runStatus(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("no .beadhub file found - run 'bdh :init' first")
+		if os.IsNotExist(err) {
+			return fmt.Errorf("no .beadhub file found - run 'bdh :init' first")
+		}
+		return fmt.Errorf("loading config: %w", err)
 	}
 
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid .beadhub config: %w", err)
 	}
+	if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
+		return err
+	}
 
-	// Get identity from aweb
-	awebClient, err := newAwebClientRequired("")
+	// Set up coordination header for this agent
+	SetCoordinationHeaderAlias(cfg.Alias)
+
+	result, err := fetchStatusWithConfig(cfg)
 	if err != nil {
 		return err
 	}
 
+	output := formatStatusOutput(result, cfg, statusJSON)
+	fmt.Print(output)
+	return nil
+}
+
+// fetchStatusWithConfig fetches status information using the provided config (for testing).
+func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
+	c, err := newBeadHubClientRequired(cfg.BeadhubURL)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 
-	identity, err := awebClient.Introspect(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get identity: %w", err)
-	}
-
-	// Get team status from beadhub
-	bhClient, err := newBeadHubClientRequired(cfg.BeadhubURL)
-	if err != nil {
-		return err
-	}
-
-	statusResp, err := bhClient.Status(ctx, &client.StatusRequest{})
+	resp, err := c.Status(ctx, &client.StatusRequest{})
 	if err != nil {
 		var clientErr *client.Error
 		if errors.As(err, &clientErr) {
-			return fmt.Errorf("BeadHub error (%d): %s", clientErr.StatusCode, clientErr.Body)
+			return nil, fmt.Errorf("BeadHub error (%d): %s", clientErr.StatusCode, clientErr.Body)
 		}
-		return fmt.Errorf("failed to fetch status: %w", err)
+		return nil, fmt.Errorf("failed to fetch status: %w", err)
 	}
 
-	if statusJSON {
+	result := &StatusResult{
+		Agents:             make([]AgentInfo, 0, len(resp.Agents)),
+		EscalationsPending: resp.EscalationsPending,
+	}
+
+	for _, agent := range resp.Agents {
+		result.Agents = append(result.Agents, AgentInfo{
+			Alias:        agent.Alias,
+			Member:       agent.Member,
+			Program:      agent.Program,
+			Role:         agent.Role,
+			Status:       agent.Status,
+			CurrentLocks: agent.CurrentLocks,
+			CurrentIssue: agent.CurrentIssue,
+			LastSeen:     agent.LastSeen,
+		})
+	}
+
+	return result, nil
+}
+
+// formatStatusOutput formats the status result for display.
+func formatStatusOutput(result *StatusResult, cfg *config.Config, asJSON bool) string {
+	if asJSON {
 		output := struct {
-			Identity struct {
-				ProjectID string `json:"project_id"`
-				AgentID   string `json:"agent_id"`
-				Alias     string `json:"alias"`
-				HumanName string `json:"human_name,omitempty"`
-				AgentType string `json:"agent_type,omitempty"`
-			} `json:"identity"`
-			Agents             []client.StatusAgent `json:"agents"`
-			EscalationsPending int                  `json:"escalations_pending"`
+			WorkspaceID        string      `json:"workspace_id"`
+			Alias              string      `json:"alias"`
+			HumanName          string      `json:"human_name"`
+			ProjectSlug        string      `json:"project_slug,omitempty"`
+			BeadhubURL         string      `json:"beadhub_url"`
+			Agents             []AgentInfo `json:"agents"`
+			EscalationsPending int         `json:"escalations_pending"`
 		}{
-			Identity: struct {
-				ProjectID string `json:"project_id"`
-				AgentID   string `json:"agent_id"`
-				Alias     string `json:"alias"`
-				HumanName string `json:"human_name,omitempty"`
-				AgentType string `json:"agent_type,omitempty"`
-			}{
-				ProjectID: identity.ProjectID,
-				AgentID:   identity.AgentID,
-				Alias:     identity.Alias,
-				HumanName: identity.HumanName,
-				AgentType: identity.AgentType,
-			},
-			Agents:             statusResp.Agents,
-			EscalationsPending: statusResp.EscalationsPending,
+			WorkspaceID:        cfg.WorkspaceID,
+			Alias:              cfg.Alias,
+			HumanName:          cfg.HumanName,
+			ProjectSlug:        cfg.ProjectSlug,
+			BeadhubURL:         cfg.BeadhubURL,
+			Agents:             result.Agents,
+			EscalationsPending: result.EscalationsPending,
 		}
-		fmt.Println(marshalJSONOrFallback(output))
-		return nil
+		return marshalJSONOrFallback(output)
 	}
 
-	// Format text output
 	var sb strings.Builder
 
-	// Identity section
-	sb.WriteString(fmt.Sprintf("## Your Identity (%s)\n", identity.Alias))
-	sb.WriteString(fmt.Sprintf("- Project: %s\n", identity.ProjectID))
-	sb.WriteString(fmt.Sprintf("- Agent: %s\n", truncateID(identity.AgentID)))
-	sb.WriteString(fmt.Sprintf("- Alias: %s\n", identity.Alias))
-	if identity.HumanName != "" {
-		sb.WriteString(fmt.Sprintf("- Human: %s\n", identity.HumanName))
-	}
-	if identity.AgentType != "" {
-		sb.WriteString(fmt.Sprintf("- Type: %s\n", identity.AgentType))
-	}
+	// Print coordination header (once, before first section)
+	sb.WriteString(FormatCoordinationHeader())
 
-	// Team status section
-	if len(statusResp.Agents) == 0 {
+	// Workspace info - this is the agent's identity
+	sb.WriteString(fmt.Sprintf("## Your Identity (%s)\n", cfg.Alias))
+	sb.WriteString(fmt.Sprintf("- Workspace: %s\n", truncateID(cfg.WorkspaceID)))
+	sb.WriteString(fmt.Sprintf("- Alias: %s\n", cfg.Alias))
+	sb.WriteString(fmt.Sprintf("- Human: %s\n", cfg.HumanName))
+	if cfg.ProjectSlug != "" {
+		sb.WriteString(fmt.Sprintf("- Project: %s\n", cfg.ProjectSlug))
+	}
+	sb.WriteString(fmt.Sprintf("- BeadHub: %s\n", cfg.BeadhubURL))
+
+	// Other agents - for coordination
+	if len(result.Agents) == 0 {
 		sb.WriteString("\n## Team Status\nNo other agents are currently active.\n")
 	} else {
 		sb.WriteString("\n## Team Status\n")
-		for _, agent := range statusResp.Agents {
-			// Skip self
-			if agent.Alias == identity.Alias {
-				continue
-			}
+		sb.WriteString("Check before claiming work to avoid conflicts:\n")
+		for _, agent := range result.Agents {
 			timeAgo := formatTimeAgo(agent.LastSeen)
 			sb.WriteString(fmt.Sprintf("- %s", agent.Alias))
 			if agent.Member != "" {
@@ -141,9 +174,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			if agent.Role != "" {
 				sb.WriteString(fmt.Sprintf(" — %s", agent.Role))
 			}
-			if agent.Status != "" {
-				sb.WriteString(fmt.Sprintf(" — %s", agent.Status))
-			}
+			sb.WriteString(fmt.Sprintf(" — %s", agent.Status))
 			if agent.CurrentIssue != "" {
 				sb.WriteString(fmt.Sprintf(" — working on %s", agent.CurrentIssue))
 			}
@@ -151,13 +182,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Escalations section
-	if statusResp.EscalationsPending > 0 {
-		sb.WriteString(fmt.Sprintf("\n## Escalations\nYou have %d pending escalations to review.\n", statusResp.EscalationsPending))
+	// Escalations
+	if result.EscalationsPending > 0 {
+		sb.WriteString(fmt.Sprintf("\n## Escalations\nYou have %d pending escalations to review.\n", result.EscalationsPending))
 	}
 
-	fmt.Print(sb.String())
-	return nil
+	return sb.String()
 }
 
 // truncateID truncates a UUID for display.
@@ -166,4 +196,49 @@ func truncateID(id string) string {
 		return id[:8] + "..."
 	}
 	return id
+}
+
+// detectAndCleanGoneWorkspaces checks for workspaces registered on this hostname
+// whose paths no longer exist, and deletes them from the server.
+func detectAndCleanGoneWorkspaces(cfg *config.Config) []GoneWorkspace {
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		return nil
+	}
+
+	c := newBeadHubClient(cfg.BeadhubURL)
+	ctx := context.Background()
+
+	includePresence := false
+	resp, err := c.Workspaces(ctx, &client.WorkspacesRequest{
+		Hostname:        hostname,
+		IncludePresence: &includePresence,
+	})
+	if err != nil {
+		return nil
+	}
+
+	var goneWorkspaces []GoneWorkspace
+	for _, ws := range resp.Workspaces {
+		if ws.WorkspacePath == "" {
+			continue
+		}
+
+		if ws.WorkspaceID == cfg.WorkspaceID {
+			continue
+		}
+
+		if _, err := os.Stat(ws.WorkspacePath); os.IsNotExist(err) {
+			_, deleteErr := c.DeleteWorkspace(ctx, ws.WorkspaceID)
+			if deleteErr == nil {
+				goneWorkspaces = append(goneWorkspaces, GoneWorkspace{
+					WorkspaceID:   ws.WorkspaceID,
+					Alias:         ws.Alias,
+					WorkspacePath: ws.WorkspacePath,
+				})
+			}
+		}
+	}
+
+	return goneWorkspaces
 }
