@@ -49,8 +49,10 @@ Setup:
 
 Global flags:
   -h, --help               - Show bdh help + bd help
-  --:help                  - Show only bdh help (not bd)
   --:local-config <path>   - Use an alternate .beadhub config file
+
+Help:
+  bdh :help              - Show only bdh help (not bd)
 
 Environment variables (for bdh :init):
   BEADHUB_URL          - Server URL (default: http://localhost:8000)
@@ -83,6 +85,7 @@ func init() {
 	rootCmd.AddCommand(projectsCmd)
 	rootCmd.AddCommand(addWorktreeCmd)
 	rootCmd.AddCommand(notifyCmd)
+	rootCmd.AddCommand(helpCmd)
 }
 
 func loadDotenvBestEffort() {
