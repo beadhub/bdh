@@ -82,6 +82,7 @@ func init() {
 	rootCmd.AddCommand(resetPolicyCmd)
 	rootCmd.AddCommand(projectsCmd)
 	rootCmd.AddCommand(addWorktreeCmd)
+	rootCmd.AddCommand(notifyCmd)
 }
 
 func loadDotenvBestEffort() {
