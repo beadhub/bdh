@@ -27,6 +27,7 @@ var (
 	initRole       string
 	initUpdate     bool
 	initInjectDocs bool
+	initSetupHooks bool
 )
 
 var initCmd = &cobra.Command{
@@ -63,6 +64,7 @@ func init() {
 	initCmd.Flags().StringVar(&initRole, "role", "", "Workspace role (e.g., reviewer)")
 	initCmd.Flags().BoolVar(&initUpdate, "update", false, "Update workspace location (hostname/path) on server")
 	initCmd.Flags().BoolVar(&initInjectDocs, "inject-docs", false, "Inject bdh instructions into CLAUDE.md/AGENTS.md")
+	initCmd.Flags().BoolVar(&initSetupHooks, "setup-hooks", false, "Set up Claude Code hooks for chat notifications")
 }
 
 // isTTY returns true if stdin is a terminal.
@@ -82,6 +84,14 @@ func runInit() error {
 		cfg, loadErr := config.Load()
 		if loadErr != nil {
 			return fmt.Errorf("failed to load existing config: %w", loadErr)
+		}
+
+		// Handle --setup-hooks for existing workspace (hooks only)
+		if initSetupHooks {
+			wd, _ := os.Getwd()
+			hooksResult := SetupClaudeHooks(wd, isTTY())
+			PrintClaudeHooksResult(hooksResult)
+			return nil
 		}
 
 		// Handle --inject-docs for existing workspace
