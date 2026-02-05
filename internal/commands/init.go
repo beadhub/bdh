@@ -95,6 +95,9 @@ func runInit() error {
 			// Also inject PRIME.md override
 			primeResult := InjectPrimeOverride(wd)
 			PrintPrimeOverrideResult(primeResult)
+			// Set up Claude Code hooks
+			hooksResult := SetupClaudeHooks(wd, isTTY())
+			PrintClaudeHooksResult(hooksResult)
 			return nil
 		}
 
@@ -646,6 +649,10 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 	// Inject PRIME.md override
 	primeResult := InjectPrimeOverride(wd)
 	PrintPrimeOverrideResult(primeResult)
+
+	// Set up Claude Code hooks for notifications
+	hooksResult := SetupClaudeHooks(wd, isTTY())
+	PrintClaudeHooksResult(hooksResult)
 
 	return nil
 }
