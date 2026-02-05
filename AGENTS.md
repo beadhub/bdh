@@ -1,6 +1,6 @@
 # Agent Instructions
 
-This project uses `bdh` for multi-agent coordination and `bd` (beads) for issue tracking. Start with `bdh :policy`.
+This project uses `bdh` for multi-agent coordination and `bdh` (beads) for issue tracking. Start with `bdh :policy`.
 
 ## Quick Reference
 
@@ -40,15 +40,23 @@ bdh :aweb chat send <alias> "message" --wait 60 # Sync chat
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 
-
 <!-- BEADHUB:START -->
 ## BeadHub Coordination
 
-This project uses `bdh` for multi-agent coordination. Run `bdh :policy` for instructions.
+This project uses `bdh` for multi-agent coordination and issue tracking.
 
+**Start every session:**
 ```bash
+bdh :policy    # READ CAREFULLY and follow diligently, start here now
 bdh :status    # your identity + team status
-bdh :policy    # READ AND FOLLOW
-bdh ready      # find work
+bdh ready      # find unblocked work
+bdh --help     # command reference
 ```
+
+**Key rules:**
+- Use `bdh` (not `bd`) so work is coordinated
+- Default to mail (`bdh :aweb mail send <alias> "message"`); use chat (`bdh :aweb chat`) when blocked
+- Respond immediately to WAITING notifications
+- Prioritize good communication — your goal is for the team to succeed
+- Before saying "done", follow the session close protocol in `bdh :policy` (includes `git push`)
 <!-- BEADHUB:END -->
