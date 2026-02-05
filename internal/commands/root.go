@@ -74,7 +74,6 @@ func init() {
 	// Add subcommands (all :* commands)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(statusCmd)
-	rootCmd.AddCommand(whoCmd)
 	rootCmd.AddCommand(reservationsCmd)
 	rootCmd.AddCommand(nextAliasPrefixCmd)
 	rootCmd.AddCommand(escalateCmd)
