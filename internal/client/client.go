@@ -1081,9 +1081,9 @@ type ListLocksRequest struct {
 // LockInfo represents a reservation in the list response.
 type LockInfo struct {
 	ReservationID       string  `json:"reservation_id"`
-	Path                string  `json:"path"`
-	Alias               string  `json:"alias"`
-	WorkspaceID         string  `json:"workspace_id"`
+	Path                string  `json:"resource_key"`
+	Alias               string  `json:"holder_alias"`
+	WorkspaceID         string  `json:"holder_agent_id"`
 	ProjectID           string  `json:"project_id"`
 	BeadID              *string `json:"bead_id,omitempty"`
 	Reason              *string `json:"reason,omitempty"`

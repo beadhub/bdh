@@ -50,6 +50,7 @@ type AgentInfo struct {
 // StatusResult contains the result of the status command.
 type StatusResult struct {
 	Agents             []AgentInfo
+	YourLocks          []string
 	EscalationsPending int
 }
 
@@ -118,6 +119,17 @@ func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
 		})
 	}
 
+	// Fetch your own locks
+	locksResp, err := c.ListLocks(ctx, &client.ListLocksRequest{
+		WorkspaceID: cfg.WorkspaceID,
+		Alias:       cfg.Alias,
+	})
+	if err == nil {
+		for _, lock := range locksResp.Reservations {
+			result.YourLocks = append(result.YourLocks, lock.Path)
+		}
+	}
+
 	return result, nil
 }
 
@@ -131,6 +143,7 @@ func formatStatusOutput(result *StatusResult, cfg *config.Config, asJSON bool) s
 			ProjectSlug        string      `json:"project_slug,omitempty"`
 			BeadhubURL         string      `json:"beadhub_url"`
 			Agents             []AgentInfo `json:"agents"`
+			YourLocks          []string    `json:"your_locks,omitempty"`
 			EscalationsPending int         `json:"escalations_pending"`
 		}{
 			WorkspaceID:        cfg.WorkspaceID,
@@ -139,6 +152,7 @@ func formatStatusOutput(result *StatusResult, cfg *config.Config, asJSON bool) s
 			ProjectSlug:        cfg.ProjectSlug,
 			BeadhubURL:         cfg.BeadhubURL,
 			Agents:             result.Agents,
+			YourLocks:          result.YourLocks,
 			EscalationsPending: result.EscalationsPending,
 		}
 		return marshalJSONOrFallback(output)
@@ -179,6 +193,14 @@ func formatStatusOutput(result *StatusResult, cfg *config.Config, asJSON bool) s
 				sb.WriteString(fmt.Sprintf(" — working on %s", agent.CurrentIssue))
 			}
 			sb.WriteString(fmt.Sprintf(" — %s\n", timeAgo))
+		}
+	}
+
+	// Your reservations
+	if len(result.YourLocks) > 0 {
+		sb.WriteString("\n## Your Reservations\n")
+		for _, lock := range result.YourLocks {
+			sb.WriteString(fmt.Sprintf("- %s\n", lock))
 		}
 	}
 
