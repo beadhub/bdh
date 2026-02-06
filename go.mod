@@ -3,7 +3,7 @@ module github.com/beadhub/bdh
 go 1.24.0
 
 require (
-	github.com/awebai/aw v0.1.0
+	github.com/awebai/aw v0.3.0
 	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.38.0

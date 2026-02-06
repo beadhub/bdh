@@ -17,10 +17,10 @@ import (
 	"github.com/beadhub/bdh/internal/config"
 )
 
-// defaultChatWait must match chat.defaultWait (unexported) in aweb-go/chat.
+// defaultChatWait mirrors chat.DefaultWait from the protocol package.
 // The protocol package uses this value to detect "user didn't set --wait" and
 // applies a 5-minute wait for --start-conversation.
-const defaultChatWait = 60
+const defaultChatWait = chat.DefaultWait
 
 var (
 	chatJSON              bool
@@ -56,7 +56,7 @@ var chatSendCmd = &cobra.Command{
 	Short: "Send a message in a chat session",
 	Long: `Send a message to one or more agents in a persistent chat session.
 
-By default, waits 60 seconds for a reply. Use --start-conversation for
+By default, waits 120 seconds for a reply. Use --start-conversation for
 a 5-minute wait when initiating a new exchange. Use --leave-conversation
 to send a final message and exit immediately.`,
 	Args: cobra.ExactArgs(2),
@@ -111,17 +111,7 @@ to send a final message and exit immediately.`,
 			StartConversation: chatStartConversation,
 		}
 
-		// Context must outlive the protocol wait. --start-conversation extends
-		// to 300s internally, and read receipts / hang-ons can extend further.
-		effectiveWait := chatWait
-		if chatStartConversation && chatWait == defaultChatWait {
-			effectiveWait = 300
-		}
-		timeout := time.Duration(effectiveWait+120) * time.Second
-		if timeout < apiTimeout {
-			timeout = apiTimeout
-		}
-		ctx, cancel := context.WithTimeout(baseCtx, timeout)
+		ctx, cancel := context.WithTimeout(baseCtx, chat.MaxSendTimeout)
 		defer cancel()
 
 		result, err := chat.Send(ctx, aw, cfg.Alias, targetAgents, args[1], opts, chatStatusCallback)
@@ -596,11 +586,6 @@ func formatChatOpenOutput(result *chat.OpenResult, asJSON bool) string {
 		} else {
 			sb.WriteString(fmt.Sprintf("%s: %s\n", m.FromAgent, m.Body))
 		}
-	}
-
-	if result.WaitExtendedSeconds > 0 {
-		minutes := result.WaitExtendedSeconds / 60
-		sb.WriteString(fmt.Sprintf("\nNote: %s's wait extended by %d min — you have time to respond\n", result.TargetAgent, minutes))
 	}
 
 	sb.WriteString(fmt.Sprintf("\nNext: Run \"bdh :aweb chat send %s \\\"your reply\\\"\"", result.TargetAgent))
