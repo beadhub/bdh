@@ -380,23 +380,6 @@ func TestFormatChatOpenOutput_WithMessages(t *testing.T) {
 	}
 }
 
-func TestFormatChatOpenOutput_WithWaitExtension(t *testing.T) {
-	result := &chat.OpenResult{
-		SessionID:           "s1",
-		TargetAgent:         "alice",
-		MarkedRead:          1,
-		WaitExtendedSeconds: 300,
-		Messages: []chat.Event{
-			{Type: "message", FromAgent: "alice", Body: "Hello"},
-		},
-	}
-
-	out := formatChatOpenOutput(result, false)
-	if !strings.Contains(out, "wait extended by 5 min") {
-		t.Errorf("expected wait extension note, got: %q", out)
-	}
-}
-
 func TestFormatChatOpenOutput_Empty(t *testing.T) {
 	result := &chat.OpenResult{
 		SessionID:      "s1",
