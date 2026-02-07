@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,10 +34,11 @@ This command:
 4. Runs bdh :init in the new worktree with the computed alias
 
 The role should be 1-2 words (e.g., "coord", "backend", "full-stack"). If omitted,
-bdh will prompt in TTY mode (default: "agent") or use "agent" in non-interactive mode.
+bdh will prompt in TTY mode with available roles from the project policy, or error
+in non-interactive mode listing the available roles.
 
 Examples:
-  bdh :add-worktree                       # Creates worktree with alias like alice-agent
+  bdh :add-worktree                       # Prompts for role from project policy
   bdh :add-worktree coord                 # Creates worktree with alias like alice-coord
   bdh :add-worktree backend --alias bob-backend  # Override default alias`,
 	Args: cobra.RangeArgs(0, 1),
@@ -145,19 +147,31 @@ func cleanupWorktree(repoPath, worktreePath, branchName string, deleteBranch boo
 }
 
 func runAddWorktree(cmd *cobra.Command, args []string) error {
+	// Load existing config early so we have BeadHub URL for role lookup
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w\n(run 'bdh :init' first to register this repository)", err)
+	}
+
 	role := ""
 	if len(args) >= 1 {
 		role = strings.TrimSpace(args[0])
 	}
 	if role == "" {
+		// Fetch available roles from server policy
+		availableRoles := fetchAvailablePolicyRoles(cfg.BeadhubURL)
+
 		if isTTY() {
 			var err error
-			role, err = promptForRole()
+			role, err = promptForRole(availableRoles)
 			if err != nil {
 				return fmt.Errorf("getting role: %w", err)
 			}
 		} else {
-			role = "agent"
+			if len(availableRoles) > 0 {
+				return fmt.Errorf("no role specified; available roles: %s. Pass role as argument: bdh :add-worktree <role>", strings.Join(availableRoles, ", "))
+			}
+			return fmt.Errorf("no role specified. Pass role as argument: bdh :add-worktree <role>")
 		}
 	}
 
@@ -171,12 +185,6 @@ func runAddWorktree(cmd *cobra.Command, args []string) error {
 	mainRepo, err := findMainRepoRoot()
 	if err != nil {
 		return fmt.Errorf("failed to find git repository: %w", err)
-	}
-
-	// Load existing config to get BeadHub URL
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w\n(run 'bdh :init' first to register this repository)", err)
 	}
 
 	// Get git remote origin for API call
@@ -305,6 +313,26 @@ func runAddWorktree(cmd *cobra.Command, args []string) error {
 	}
 
 	return fmt.Errorf("exhausted %d attempts to create a worktree (try specifying --alias)", maxAttempts)
+}
+
+// fetchAvailablePolicyRoles fetches the role names defined in the server's active policy.
+// Returns nil on any error (graceful degradation).
+func fetchAvailablePolicyRoles(beadhubURL string) []string {
+	c := newBeadHubClient(beadhubURL)
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+
+	resp, err := c.ActivePolicy(ctx, nil)
+	if err != nil {
+		return nil
+	}
+
+	roles := make([]string, 0, len(resp.Roles))
+	for role := range resp.Roles {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	return roles
 }
 
 func isAliasAlreadyTakenError(err error) bool {

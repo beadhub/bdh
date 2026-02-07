@@ -162,6 +162,16 @@ func TestAddAgent_Integration(t *testing.T) {
 				"alias":            alias,
 				"created":          true,
 			})
+		case "/v1/policies/active":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"policy_id":  "test-policy-id",
+				"project_id": "test-project-uuid",
+				"version":    1,
+				"roles": map[string]any{
+					"implementer": map[string]any{"title": "Implementer", "playbook_md": "implement things"},
+					"coordinator": map[string]any{"title": "Coordinator", "playbook_md": "coordinate things"},
+				},
+			})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -263,8 +273,8 @@ func TestAddAgent_Integration(t *testing.T) {
 	_ = exec.Command("git", "-C", mainRepo, "worktree", "remove", worktreePath, "--force").Run()
 }
 
-func TestAddAgent_DefaultRole(t *testing.T) {
-	// Create a temporary directory structure for the git repo
+func TestAddAgent_DefaultRole_NonTTY_ErrorsWithAvailableRoles(t *testing.T) {
+	// Non-TTY mode with no args should error and list available roles from policy
 	tmpDir := t.TempDir()
 	t.Setenv("AW_CONFIG_PATH", filepath.Join(tmpDir, "aw-config.yaml"))
 	mainRepo := filepath.Join(tmpDir, "myrepo")
@@ -276,63 +286,27 @@ func TestAddAgent_DefaultRole(t *testing.T) {
 	if err := exec.Command("git", "-C", mainRepo, "init").Run(); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-
-	// Configure git user for commits
 	_ = exec.Command("git", "-C", mainRepo, "config", "user.email", "test@test.com").Run()
 	_ = exec.Command("git", "-C", mainRepo, "config", "user.name", "Test User").Run()
-
-	// Create initial commit (required for worktree)
 	if err := os.WriteFile(filepath.Join(mainRepo, "README.md"), []byte("# Test"), 0644); err != nil {
 		t.Fatalf("write README: %v", err)
 	}
-	if err := exec.Command("git", "-C", mainRepo, "add", ".").Run(); err != nil {
-		t.Fatalf("git add: %v", err)
-	}
-	if err := exec.Command("git", "-C", mainRepo, "commit", "-m", "Initial commit").Run(); err != nil {
-		t.Fatalf("git commit: %v", err)
-	}
+	_ = exec.Command("git", "-C", mainRepo, "add", ".").Run()
+	_ = exec.Command("git", "-C", mainRepo, "commit", "-m", "Initial commit").Run()
+	_ = exec.Command("git", "-C", mainRepo, "remote", "add", "origin", "git@github.com:test/repo.git").Run()
 
-	// Add a fake remote origin
-	if err := exec.Command("git", "-C", mainRepo, "remote", "add", "origin", "git@github.com:test/repo.git").Run(); err != nil {
-		t.Fatalf("git remote add: %v", err)
-	}
-
-	// Create .beads directory and dummy DB
-	if err := os.MkdirAll(filepath.Join(mainRepo, ".beads"), 0755); err != nil {
-		t.Fatalf("mkdir .beads: %v", err)
-	}
-	beads.ResetCache()
-	if err := os.WriteFile(filepath.Join(mainRepo, ".beads", "beads.db"), []byte(""), 0600); err != nil {
-		t.Fatalf("write beads.db: %v", err)
-	}
-
-	// Create mock server
+	// Create mock server with policy roles
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/workspaces/suggest-name-prefix":
+		case "/v1/policies/active":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"name_prefix":  "testname",
-				"project_slug": "test-project",
-			})
-		case "/v1/init":
-			var initReq struct {
-				Alias string `json:"alias"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&initReq)
-			alias := initReq.Alias
-			if strings.TrimSpace(alias) == "" {
-				alias = "testname-agent"
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"status":           "ok",
-				"api_key":          "aw_sk_123456789012345678901234567890123456",
-				"project_id":       "test-project-uuid",
-				"project_slug":     "test-project",
-				"repo_id":          "c3d4e5f6-7890-12cd-ef01-345678901234",
-				"canonical_origin": "github.com/test/repo",
-				"workspace_id":     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				"alias":            alias,
-				"created":          true,
+				"policy_id":  "test-policy-id",
+				"project_id": "test-project-uuid",
+				"version":    1,
+				"roles": map[string]any{
+					"implementer": map[string]any{"title": "Implementer", "playbook_md": "implement things"},
+					"coordinator": map[string]any{"title": "Coordinator", "playbook_md": "coordinate things"},
+				},
 			})
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -340,16 +314,14 @@ func TestAddAgent_DefaultRole(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Set up environment
 	t.Setenv("BEADHUB_URL", server.URL)
 	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
 
-	// Change to main repo directory
 	origDir, _ := os.Getwd()
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 	_ = os.Chdir(mainRepo)
 
-	// Create initial .beadhub config so the command can load it
+	// Create initial .beadhub config
 	cfg := &config.Config{
 		WorkspaceID:     "initial-workspace-id",
 		BeadhubURL:      server.URL,
@@ -365,56 +337,20 @@ func TestAddAgent_DefaultRole(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	serverName, err := awconfig.DeriveServerNameFromURL(server.URL)
-	if err != nil {
-		t.Fatalf("derive server name: %v", err)
-	}
-	accountName := deriveAccountName(serverName, cfg.ProjectSlug, cfg.Alias)
-	if err := awconfig.UpdateGlobalAt(os.Getenv("AW_CONFIG_PATH"), func(gc *awconfig.GlobalConfig) error {
-		if gc.Servers == nil {
-			gc.Servers = map[string]awconfig.Server{}
-		}
-		if gc.Accounts == nil {
-			gc.Accounts = map[string]awconfig.Account{}
-		}
-		gc.Servers[serverName] = awconfig.Server{URL: server.URL}
-		gc.Accounts[accountName] = awconfig.Account{
-			Server:         serverName,
-			APIKey:         "aw_sk_seed_key_123456789012345678901234567890",
-			DefaultProject: cfg.ProjectSlug,
-			AgentID:        cfg.WorkspaceID,
-			AgentAlias:     cfg.Alias,
-		}
-		gc.DefaultAccount = accountName
-		return nil
-	}); err != nil {
-		t.Fatalf("seed aw global config: %v", err)
-	}
-	if err := awconfig.SaveWorktreeContextTo(filepath.Join(mainRepo, awconfig.DefaultWorktreeContextRelativePath()), &awconfig.WorktreeContext{
-		DefaultAccount: accountName,
-		ServerAccounts: map[string]string{serverName: accountName},
-	}); err != nil {
-		t.Fatalf("seed .aw/context: %v", err)
-	}
-
-	// Reset flags
 	addWorktreeAlias = ""
 	resetAddWorktreeInitFlags()
 
-	// Run the command without args (default role)
-	err = runAddWorktree(addWorktreeCmd, []string{})
-	if err != nil {
-		t.Fatalf("runAddWorktree() error: %v", err)
+	// Run the command without args (non-TTY should error)
+	err := runAddWorktree(addWorktreeCmd, []string{})
+	if err == nil {
+		t.Fatal("expected error when no role specified in non-TTY mode")
 	}
-
-	// Verify worktree was created
-	worktreePath := filepath.Join(tmpDir, "myrepo-testname-agent")
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		t.Error("worktree directory was not created")
+	if !strings.Contains(err.Error(), "no role specified") {
+		t.Errorf("expected 'no role specified' error, got: %v", err)
 	}
-
-	// Cleanup: remove worktree
-	_ = exec.Command("git", "-C", mainRepo, "worktree", "remove", worktreePath, "--force").Run()
+	if !strings.Contains(err.Error(), "coordinator") || !strings.Contains(err.Error(), "implementer") {
+		t.Errorf("expected error to list available roles, got: %v", err)
+	}
 }
 
 func TestAddAgent_DirectoryAlreadyExists(t *testing.T) {

@@ -226,8 +226,40 @@ func getDefaultHumanName() string {
 }
 
 // promptForRole prompts the user interactively for the workspace role.
-func promptForRole() (string, error) {
+// If availableRoles is non-empty, shows a numbered menu; otherwise falls back to free-text with "agent" default.
+func promptForRole(availableRoles []string) (string, error) {
 	reader := bufio.NewReader(os.Stdin)
+
+	if len(availableRoles) > 0 {
+		fmt.Println("Available roles:")
+		for i, r := range availableRoles {
+			fmt.Printf("  %d) %s\n", i+1, r)
+		}
+		fmt.Println()
+		for {
+			fmt.Printf("Select role (1-%d) or type a custom role: ", len(availableRoles))
+			input, err := reader.ReadString('\n')
+			if err != nil {
+				return "", err
+			}
+			input = strings.TrimSpace(input)
+			if input == "" {
+				continue
+			}
+			// Check if input is a number selecting from the menu
+			var num int
+			if _, err := fmt.Sscanf(input, "%d", &num); err == nil && num >= 1 && num <= len(availableRoles) {
+				return availableRoles[num-1], nil
+			}
+			// Treat as custom role
+			normalized := config.NormalizeRole(input)
+			if !config.IsValidRole(normalized) {
+				fmt.Println("Invalid role. Use 1-2 words (letters/numbers) with hyphens/underscores allowed; max 50 chars.")
+				continue
+			}
+			return normalized, nil
+		}
+	}
 
 	defaultRole := "agent"
 	for {
@@ -406,7 +438,7 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 		}
 	} else if isTTY() {
 		var err error
-		role, err = promptForRole()
+		role, err = promptForRole(nil)
 		if err != nil {
 			return fmt.Errorf("getting role: %w", err)
 		}
