@@ -159,10 +159,12 @@ func runAddWorktree(cmd *cobra.Command, args []string) error {
 	}
 	if role == "" {
 		// Fetch available roles from server policy
-		availableRoles := fetchAvailablePolicyRoles(cfg.BeadhubURL)
+		availableRoles, err := fetchAvailablePolicyRoles(cfg.BeadhubURL)
+		if err != nil {
+			return err
+		}
 
 		if isTTY() {
-			var err error
 			role, err = promptForRole(availableRoles)
 			if err != nil {
 				return fmt.Errorf("getting role: %w", err)
@@ -316,8 +318,7 @@ func runAddWorktree(cmd *cobra.Command, args []string) error {
 }
 
 // fetchAvailablePolicyRoles fetches the role names defined in the server's active policy.
-// Returns nil on any error (graceful degradation).
-func fetchAvailablePolicyRoles(beadhubURL string) []string {
+func fetchAvailablePolicyRoles(beadhubURL string) ([]string, error) {
 	c := newBeadHubClient(beadhubURL)
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
@@ -325,7 +326,7 @@ func fetchAvailablePolicyRoles(beadhubURL string) []string {
 	onlySelected := false
 	resp, err := c.ActivePolicy(ctx, &client.ActivePolicyRequest{OnlySelected: &onlySelected})
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("fetching policy roles: %w", err)
 	}
 
 	roles := make([]string, 0, len(resp.Roles))
@@ -333,7 +334,7 @@ func fetchAvailablePolicyRoles(beadhubURL string) []string {
 		roles = append(roles, role)
 	}
 	sort.Strings(roles)
-	return roles
+	return roles, nil
 }
 
 func isAliasAlreadyTakenError(err error) bool {
