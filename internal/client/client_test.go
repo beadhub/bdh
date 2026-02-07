@@ -258,9 +258,10 @@ func TestActivePolicy(t *testing.T) {
 	defer server.Close()
 
 	c := NewWithAPIKey(server.URL, "aw_sk_test123")
+	onlySelected := true
 	resp, err := c.ActivePolicy(context.Background(), &ActivePolicyRequest{
 		Role:         "coordinator",
-		OnlySelected: true,
+		OnlySelected: &onlySelected,
 	})
 	if err != nil {
 		t.Fatalf("ActivePolicy() error: %v", err)

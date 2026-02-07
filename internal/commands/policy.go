@@ -157,7 +157,7 @@ func fetchActivePolicyCachedWithConfig(cfg *config.Config, role string, onlySele
 
 	fetchResp, fetchErr := c.ActivePolicyFetch(ctx, &client.ActivePolicyRequest{
 		Role:         role,
-		OnlySelected: onlySelected,
+		OnlySelected: &onlySelected,
 	}, opts)
 	if fetchErr != nil {
 		var clientErr *client.Error
@@ -242,7 +242,7 @@ func fetchActivePolicyWithConfig(cfg *config.Config, role string, onlySelected b
 
 	resp, err := c.ActivePolicy(ctx, &client.ActivePolicyRequest{
 		Role:         role,
-		OnlySelected: onlySelected,
+		OnlySelected: &onlySelected,
 	})
 	if err != nil {
 		var clientErr *client.Error
@@ -308,7 +308,8 @@ func fetchAvailablePolicyRolesWithConfig(cfg *config.Config) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 
-	resp, err := c.ActivePolicy(ctx, &client.ActivePolicyRequest{OnlySelected: false})
+	onlySelected := false
+	resp, err := c.ActivePolicy(ctx, &client.ActivePolicyRequest{OnlySelected: &onlySelected})
 	if err != nil {
 		return nil, err
 	}

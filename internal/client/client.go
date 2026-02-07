@@ -612,7 +612,7 @@ func (c *Client) TeamWorkspaces(ctx context.Context, req *TeamWorkspacesRequest)
 // ActivePolicyRequest is the request parameters for GET /v1/policies/active.
 type ActivePolicyRequest struct {
 	Role         string
-	OnlySelected bool
+	OnlySelected *bool
 }
 
 // PolicyInvariant represents a single global invariant.
@@ -695,8 +695,8 @@ func (c *Client) ActivePolicyFetch(ctx context.Context, reqParams *ActivePolicyR
 		if reqParams.Role != "" {
 			q.Set("role", reqParams.Role)
 		}
-		if reqParams.OnlySelected {
-			q.Set("only_selected", "true")
+		if reqParams.OnlySelected != nil {
+			q.Set("only_selected", fmt.Sprintf("%t", *reqParams.OnlySelected))
 		}
 		req.URL.RawQuery = q.Encode()
 	}
@@ -1145,8 +1145,8 @@ func (c *Client) getWithHeaders(ctx context.Context, path string, params any, re
 			if p.Role != "" {
 				q.Set("role", p.Role)
 			}
-			if p.OnlySelected {
-				q.Set("only_selected", "true")
+			if p.OnlySelected != nil {
+				q.Set("only_selected", fmt.Sprintf("%t", *p.OnlySelected))
 			}
 		}
 		req.URL.RawQuery = q.Encode()

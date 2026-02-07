@@ -322,7 +322,8 @@ func fetchAvailablePolicyRoles(beadhubURL string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 
-	resp, err := c.ActivePolicy(ctx, &client.ActivePolicyRequest{OnlySelected: false})
+	onlySelected := false
+	resp, err := c.ActivePolicy(ctx, &client.ActivePolicyRequest{OnlySelected: &onlySelected})
 	if err != nil {
 		return nil
 	}
