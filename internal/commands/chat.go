@@ -18,13 +18,12 @@ import (
 )
 
 // defaultChatWait mirrors chat.DefaultWait from the protocol package.
-// The protocol package uses this value to detect "user didn't set --wait" and
-// applies a 5-minute wait for --start-conversation.
 const defaultChatWait = chat.DefaultWait
 
 var (
 	chatJSON              bool
 	chatWait              int
+	chatListenWait        int
 	chatStartConversation bool
 	chatLeaveConversation bool
 )
@@ -107,6 +106,7 @@ to send a final message and exit immediately.`,
 
 		opts := chat.SendOptions{
 			Wait:              chatWait,
+			WaitExplicit:      cmd.Flags().Changed("wait"),
 			Leaving:           chatLeaveConversation,
 			StartConversation: chatStartConversation,
 		}
@@ -276,18 +276,65 @@ var chatHangOnCmd = &cobra.Command{
 	},
 }
 
+var chatListenCmd = &cobra.Command{
+	Use:   "listen <alias>",
+	Short: "Wait for a message without sending",
+	Long: `Wait for a message in an existing conversation without sending.
+
+Connects to the session's SSE stream and returns when a message arrives
+or the wait timeout elapses.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("invalid .beadhub config: %w", err)
+		}
+		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
+			return err
+		}
+
+		baseCtx := cmd.Context()
+		targetAgent, err := resolveTargetAlias(baseCtx, cfg, args[0])
+		if err != nil {
+			return err
+		}
+		SetExcludeChatAlias(targetAgent)
+
+		aw, err := newAwebClientRequired(cfg.BeadhubURL)
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(baseCtx, chat.MaxSendTimeout)
+		defer cancel()
+
+		result, err := chat.Listen(ctx, aw, targetAgent, chatListenWait, chatStatusCallback)
+		if err != nil {
+			return err
+		}
+		fmt.Print(formatChatOutput(result, chatJSON))
+		return nil
+	},
+}
+
 func init() {
 	chatCmd.AddCommand(chatSendCmd)
 	chatCmd.AddCommand(chatPendingCmd)
 	chatCmd.AddCommand(chatOpenCmd)
 	chatCmd.AddCommand(chatHistoryCmd)
 	chatCmd.AddCommand(chatHangOnCmd)
+	chatCmd.AddCommand(chatListenCmd)
 
 	chatCmd.PersistentFlags().BoolVar(&chatJSON, "json", false, "Output in JSON format")
 
 	chatSendCmd.Flags().IntVar(&chatWait, "wait", defaultChatWait, "Timeout in seconds (0 to not wait)")
 	chatSendCmd.Flags().BoolVar(&chatStartConversation, "start-conversation", false, "Initiate a new exchange (5 min wait)")
 	chatSendCmd.Flags().BoolVar(&chatLeaveConversation, "leave-conversation", false, "Send final message and exit (no wait)")
+
+	chatListenCmd.Flags().IntVar(&chatListenWait, "wait", defaultChatWait, "Seconds to wait for a message (0 = no wait)")
 }
 
 // resolveTargetAlias resolves a single alias with fuzzy matching and prevents self-chat.
