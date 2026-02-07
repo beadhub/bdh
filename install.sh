@@ -543,7 +543,8 @@ build_from_source() {
     fi
 }
 
-# Run bdh :init with API key if one was provided
+# Run bdh :init with API key if one was provided.
+# Passes the key via environment variable to avoid exposing it in process listings.
 run_init_with_api_key() {
     local api_key=$1
     if [ -z "$api_key" ]; then
@@ -551,16 +552,16 @@ run_init_with_api_key() {
     fi
     echo ""
     log_info "API key detected, running bdh :init..."
-    if ! bdh :init --api-key="$api_key"; then
+    if ! BEADHUB_API_KEY="$api_key" bdh :init; then
         log_warning "bdh :init failed. You can retry manually:"
-        echo "  bdh :init --api-key=<your-key>"
+        echo "  BEADHUB_API_KEY=<your-key> bdh :init"
     fi
 }
 
 # Main installation flow
 main() {
     local api_key=""
-    if [ $# -ge 1 ] && echo "$1" | grep -qE '^(bh_sk_|aw_sk_)'; then
+    if [ $# -ge 1 ] && echo "$1" | grep -qE '^(bh_sk_|aw_sk_).{32,}$'; then
         api_key="$1"
     fi
 

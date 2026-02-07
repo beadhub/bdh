@@ -915,8 +915,8 @@ func TestInitCommand_APIKeyHandles401(t *testing.T) {
 	if !strings.Contains(err.Error(), "API key invalid or expired") {
 		t.Errorf("error should mention API key invalid or expired, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "beadhub.com") {
-		t.Errorf("error should mention beadhub.com for key generation, got: %v", err)
+	if !strings.Contains(err.Error(), "dashboard") {
+		t.Errorf("error should mention dashboard for key generation, got: %v", err)
 	}
 }
 
@@ -960,5 +960,48 @@ func TestInitCommand_APIKeyAcceptsAwSkPrefix(t *testing.T) {
 
 	if gotAuth != "Bearer aw_sk_123456789012345678901234567890123456" {
 		t.Errorf("Authorization = %q, want Bearer with aw_sk_ API key", gotAuth)
+	}
+}
+
+func TestInitCommand_APIKeyFromEnvVar(t *testing.T) {
+	setupTempWorkspace(t)
+
+	var gotAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/init" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		gotAuth = r.Header.Get("Authorization")
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":           "ok",
+			"api_key":          "aw_sk_123456789012345678901234567890123456",
+			"project_id":       "proj-1",
+			"project_slug":     "test-project",
+			"repo_id":          "c3d4e5f6-7890-12cd-ef01-345678901234",
+			"canonical_origin": "github.com/test/repo",
+			"workspace_id":     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+			"alias":            "test-agent",
+			"created":          true,
+		})
+	}))
+	defer server.Close()
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ALIAS", "test-agent")
+	t.Setenv("BEADHUB_HUMAN", "Test Human")
+	t.Setenv("BEADHUB_PROJECT", "test-project")
+	t.Setenv("BEADHUB_API_KEY", "bh_sk_envvar_test_678901234567890123456")
+
+	// No --api-key flag set — should fall back to BEADHUB_API_KEY env var
+	if err := runInit(); err != nil {
+		t.Fatalf("runInit() error: %v", err)
+	}
+
+	if gotAuth != "Bearer bh_sk_envvar_test_678901234567890123456" {
+		t.Errorf("Authorization = %q, want Bearer with env var API key", gotAuth)
 	}
 }

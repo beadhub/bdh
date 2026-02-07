@@ -420,12 +420,17 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 		}
 	}
 
-	// Validate --api-key format early (before any network calls)
+	// Resolve API key: --api-key flag > BEADHUB_API_KEY env var
+	if initAPIKey == "" {
+		initAPIKey = strings.TrimSpace(os.Getenv("BEADHUB_API_KEY"))
+	}
+
+	// Validate API key format early (before any network calls)
 	if initAPIKey != "" {
 		if !strings.HasPrefix(initAPIKey, "bh_sk_") && !strings.HasPrefix(initAPIKey, "aw_sk_") {
 			return fmt.Errorf("invalid API key: must start with bh_sk_ or aw_sk_")
 		}
-		if len(initAPIKey) < 38 {
+		if len(initAPIKey) < 38 { // prefix (6 chars) + 32 chars key material
 			return fmt.Errorf("invalid API key: too short (expected at least 38 characters)")
 		}
 	}
@@ -544,7 +549,7 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 		if clientErr, ok := err.(*client.Error); ok {
 			// API key auth: 401 means invalid/expired key — fail immediately
 			if initAPIKey != "" && clientErr.StatusCode == 401 {
-				return fmt.Errorf("API key invalid or expired. Generate a new one at https://app.beadhub.com/dashboard/cloud/keys")
+				return fmt.Errorf("API key invalid or expired. Generate a new key from your BeadHub dashboard")
 			}
 			// Parse error body for code
 			if strings.Contains(clientErr.Body, "project_not_found") {
