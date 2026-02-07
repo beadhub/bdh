@@ -308,7 +308,7 @@ func fetchAvailablePolicyRolesWithConfig(cfg *config.Config) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 
-	resp, err := c.ActivePolicy(ctx, nil)
+	resp, err := c.ActivePolicy(ctx, &client.ActivePolicyRequest{OnlySelected: false})
 	if err != nil {
 		return nil, err
 	}

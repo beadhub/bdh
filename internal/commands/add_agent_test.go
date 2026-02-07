@@ -162,16 +162,6 @@ func TestAddAgent_Integration(t *testing.T) {
 				"alias":            alias,
 				"created":          true,
 			})
-		case "/v1/policies/active":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"policy_id":  "test-policy-id",
-				"project_id": "test-project-uuid",
-				"version":    1,
-				"roles": map[string]any{
-					"implementer": map[string]any{"title": "Implementer", "playbook_md": "implement things"},
-					"coordinator": map[string]any{"title": "Coordinator", "playbook_md": "coordinate things"},
-				},
-			})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -273,8 +263,7 @@ func TestAddAgent_Integration(t *testing.T) {
 	_ = exec.Command("git", "-C", mainRepo, "worktree", "remove", worktreePath, "--force").Run()
 }
 
-func TestAddAgent_DefaultRole_NonTTY_ErrorsWithAvailableRoles(t *testing.T) {
-	// Non-TTY mode with no args should error and list available roles from policy
+func TestAddAgent_NoRole_NonTTY_ErrorsWithAvailableRoles(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("AW_CONFIG_PATH", filepath.Join(tmpDir, "aw-config.yaml"))
 	mainRepo := filepath.Join(tmpDir, "myrepo")
@@ -282,30 +271,15 @@ func TestAddAgent_DefaultRole_NonTTY_ErrorsWithAvailableRoles(t *testing.T) {
 		t.Fatalf("mkdir main repo: %v", err)
 	}
 
-	// Initialize git repo
-	if err := exec.Command("git", "-C", mainRepo, "init").Run(); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
-	_ = exec.Command("git", "-C", mainRepo, "config", "user.email", "test@test.com").Run()
-	_ = exec.Command("git", "-C", mainRepo, "config", "user.name", "Test User").Run()
-	if err := os.WriteFile(filepath.Join(mainRepo, "README.md"), []byte("# Test"), 0644); err != nil {
-		t.Fatalf("write README: %v", err)
-	}
-	_ = exec.Command("git", "-C", mainRepo, "add", ".").Run()
-	_ = exec.Command("git", "-C", mainRepo, "commit", "-m", "Initial commit").Run()
-	_ = exec.Command("git", "-C", mainRepo, "remote", "add", "origin", "git@github.com:test/repo.git").Run()
-
-	// Create mock server with policy roles
+	// Create mock server that returns policy roles
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/policies/active":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"policy_id":  "test-policy-id",
-				"project_id": "test-project-uuid",
-				"version":    1,
+				"policy_id": "pol-123",
 				"roles": map[string]any{
-					"implementer": map[string]any{"title": "Implementer", "playbook_md": "implement things"},
-					"coordinator": map[string]any{"title": "Coordinator", "playbook_md": "coordinate things"},
+					"implementer": map[string]any{"title": "Implementer"},
+					"coordinator": map[string]any{"title": "Coordinator"},
 				},
 			})
 		default:
@@ -315,13 +289,11 @@ func TestAddAgent_DefaultRole_NonTTY_ErrorsWithAvailableRoles(t *testing.T) {
 	defer server.Close()
 
 	t.Setenv("BEADHUB_URL", server.URL)
-	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
 
 	origDir, _ := os.Getwd()
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 	_ = os.Chdir(mainRepo)
 
-	// Create initial .beadhub config
 	cfg := &config.Config{
 		WorkspaceID:     "initial-workspace-id",
 		BeadhubURL:      server.URL,
@@ -340,16 +312,69 @@ func TestAddAgent_DefaultRole_NonTTY_ErrorsWithAvailableRoles(t *testing.T) {
 	addWorktreeAlias = ""
 	resetAddWorktreeInitFlags()
 
-	// Run the command without args (non-TTY should error)
+	// Non-TTY with no args should error listing available roles
 	err := runAddWorktree(addWorktreeCmd, []string{})
 	if err == nil {
 		t.Fatal("expected error when no role specified in non-TTY mode")
 	}
-	if !strings.Contains(err.Error(), "no role specified") {
-		t.Errorf("expected 'no role specified' error, got: %v", err)
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "no role specified") {
+		t.Errorf("error should mention 'no role specified', got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "coordinator") || !strings.Contains(err.Error(), "implementer") {
-		t.Errorf("expected error to list available roles, got: %v", err)
+	if !strings.Contains(errMsg, "coordinator") || !strings.Contains(errMsg, "implementer") {
+		t.Errorf("error should list available roles, got: %v", err)
+	}
+}
+
+func TestAddAgent_NoRole_NonTTY_ErrorsWithoutRoles(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("AW_CONFIG_PATH", filepath.Join(tmpDir, "aw-config.yaml"))
+	mainRepo := filepath.Join(tmpDir, "myrepo")
+	if err := os.MkdirAll(mainRepo, 0755); err != nil {
+		t.Fatalf("mkdir main repo: %v", err)
+	}
+
+	// Mock server returns no roles (policy endpoint 404s)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	t.Setenv("BEADHUB_URL", server.URL)
+
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	_ = os.Chdir(mainRepo)
+
+	cfg := &config.Config{
+		WorkspaceID:     "initial-workspace-id",
+		BeadhubURL:      server.URL,
+		ProjectSlug:     "test-project",
+		RepoID:          "initial-repo-id",
+		RepoOrigin:      "git@github.com:test/repo.git",
+		CanonicalOrigin: "github.com/test/repo",
+		Alias:           "initial-agent",
+		HumanName:       "Test Human",
+		Role:            "agent",
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	addWorktreeAlias = ""
+	resetAddWorktreeInitFlags()
+
+	// Non-TTY with no args and no policy roles should error without listing roles
+	err := runAddWorktree(addWorktreeCmd, []string{})
+	if err == nil {
+		t.Fatal("expected error when no role specified in non-TTY mode")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "no role specified") {
+		t.Errorf("error should mention 'no role specified', got: %v", err)
+	}
+	if strings.Contains(errMsg, "available roles") {
+		t.Errorf("error should not mention 'available roles' when none are available, got: %v", err)
 	}
 }
 
