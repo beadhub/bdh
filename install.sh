@@ -543,8 +543,27 @@ build_from_source() {
     fi
 }
 
+# Run bdh :init with API key if one was provided
+run_init_with_api_key() {
+    local api_key=$1
+    if [ -z "$api_key" ]; then
+        return 0
+    fi
+    echo ""
+    log_info "API key detected, running bdh :init..."
+    if ! bdh :init --api-key="$api_key"; then
+        log_warning "bdh :init failed. You can retry manually:"
+        echo "  bdh :init --api-key=<your-key>"
+    fi
+}
+
 # Main installation flow
 main() {
+    local api_key=""
+    if [ $# -ge 1 ] && echo "$1" | grep -qE '^(bh_sk_|aw_sk_)'; then
+        api_key="$1"
+    fi
+
     echo ""
     echo "🔗 bdh (BeadHub CLI) Installer"
     echo ""
@@ -557,6 +576,7 @@ main() {
     # Try downloading from GitHub releases first
     if install_from_release "$platform"; then
         verify_installation
+        run_init_with_api_key "$api_key"
         exit 0
     fi
 
@@ -566,6 +586,7 @@ main() {
     if check_go; then
         if install_with_go; then
             verify_installation
+            run_init_with_api_key "$api_key"
             exit 0
         fi
     fi
@@ -589,6 +610,7 @@ main() {
 
     if build_from_source; then
         verify_installation
+        run_init_with_api_key "$api_key"
         exit 0
     fi
 

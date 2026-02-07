@@ -602,29 +602,6 @@ func isCloseCommandFromArgs(args []string) bool {
 	return len(args) >= 1 && args[0] == "close"
 }
 
-// isClaimCommand checks if args represent a claim command (update --status in_progress).
-func isClaimCommand(args []string) bool {
-	if len(args) < 2 || args[0] != "update" {
-		return false
-	}
-
-	for i := 1; i < len(args); i++ {
-		arg := args[i]
-
-		// Check for --status in_progress or -s in_progress
-		if (arg == "--status" || arg == "-s") && i+1 < len(args) && args[i+1] == "in_progress" {
-			return true
-		}
-
-		// Check for --status=in_progress
-		if strings.HasPrefix(arg, "--status=") && strings.TrimPrefix(arg, "--status=") == "in_progress" {
-			return true
-		}
-	}
-
-	return false
-}
-
 // isWorkspaceRecentlyActive checks if a workspace was active after the given threshold.
 // Returns true if EITHER FocusUpdatedAt OR LastSeen is recent (uses OR logic, not fallback).
 // An agent may have set focus a while ago but is still actively working within that focus.

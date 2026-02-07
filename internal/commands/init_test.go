@@ -22,6 +22,7 @@ func resetInitFlags() {
 	initRole = ""
 	initUpdate = false
 	initInjectDocs = false
+	initAPIKey = ""
 }
 
 func setupTempWorkspace(t *testing.T) string {
@@ -792,4 +793,172 @@ func splitLines(s string) []string {
 		lines = append(lines, s[start:])
 	}
 	return lines
+}
+
+// =============================================================================
+// --api-key flag tests
+// =============================================================================
+
+func TestInitCommand_APIKeyUsesBearer(t *testing.T) {
+	setupTempWorkspace(t)
+
+	var gotAuth string
+	var gotEmail string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/init" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		gotAuth = r.Header.Get("Authorization")
+
+		var req struct {
+			Email string `json:"email"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		gotEmail = req.Email
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":           "ok",
+			"api_key":          "aw_sk_123456789012345678901234567890123456",
+			"project_id":       "proj-1",
+			"project_slug":     "test-project",
+			"repo_id":          "c3d4e5f6-7890-12cd-ef01-345678901234",
+			"canonical_origin": "github.com/test/repo",
+			"workspace_id":     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+			"alias":            "test-agent",
+			"created":          true,
+		})
+	}))
+	defer server.Close()
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ALIAS", "test-agent")
+	t.Setenv("BEADHUB_HUMAN", "Test Human")
+	t.Setenv("BEADHUB_PROJECT", "test-project")
+
+	initAPIKey = "bh_sk_123456789012345678901234567890123456"
+
+	if err := runInit(); err != nil {
+		t.Fatalf("runInit() error: %v", err)
+	}
+
+	if gotAuth != "Bearer bh_sk_123456789012345678901234567890123456" {
+		t.Errorf("Authorization = %q, want Bearer with API key", gotAuth)
+	}
+
+	if gotEmail != "" {
+		t.Errorf("email should be empty when using --api-key, got %q", gotEmail)
+	}
+}
+
+func TestInitCommand_APIKeyRejectsInvalidPrefix(t *testing.T) {
+	setupTempWorkspace(t)
+
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+
+	initAPIKey = "invalid_key_1234567890123456789012345678"
+
+	err := runInit()
+	if err == nil {
+		t.Fatal("runInit() should error with invalid API key prefix")
+	}
+	if !strings.Contains(err.Error(), "API key") {
+		t.Errorf("error should mention API key, got: %v", err)
+	}
+}
+
+func TestInitCommand_APIKeyRejectsTooShort(t *testing.T) {
+	setupTempWorkspace(t)
+
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+
+	initAPIKey = "bh_sk_tooshort"
+
+	err := runInit()
+	if err == nil {
+		t.Fatal("runInit() should error with short API key")
+	}
+	if !strings.Contains(err.Error(), "API key") {
+		t.Errorf("error should mention API key, got: %v", err)
+	}
+}
+
+func TestInitCommand_APIKeyHandles401(t *testing.T) {
+	setupTempWorkspace(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/init" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"detail": "invalid_api_key",
+		})
+	}))
+	defer server.Close()
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ALIAS", "test-agent")
+	t.Setenv("BEADHUB_HUMAN", "Test Human")
+	t.Setenv("BEADHUB_PROJECT", "test-project")
+
+	initAPIKey = "bh_sk_123456789012345678901234567890123456"
+
+	err := runInit()
+	if err == nil {
+		t.Fatal("runInit() should error on 401")
+	}
+	if !strings.Contains(err.Error(), "API key invalid or expired") {
+		t.Errorf("error should mention API key invalid or expired, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "beadhub.com") {
+		t.Errorf("error should mention beadhub.com for key generation, got: %v", err)
+	}
+}
+
+func TestInitCommand_APIKeyAcceptsAwSkPrefix(t *testing.T) {
+	setupTempWorkspace(t)
+
+	var gotAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/init" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		gotAuth = r.Header.Get("Authorization")
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":           "ok",
+			"api_key":          "aw_sk_123456789012345678901234567890123456",
+			"project_id":       "proj-1",
+			"project_slug":     "test-project",
+			"repo_id":          "c3d4e5f6-7890-12cd-ef01-345678901234",
+			"canonical_origin": "github.com/test/repo",
+			"workspace_id":     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+			"alias":            "test-agent",
+			"created":          true,
+		})
+	}))
+	defer server.Close()
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ALIAS", "test-agent")
+	t.Setenv("BEADHUB_HUMAN", "Test Human")
+	t.Setenv("BEADHUB_PROJECT", "test-project")
+
+	initAPIKey = "aw_sk_123456789012345678901234567890123456"
+
+	if err := runInit(); err != nil {
+		t.Fatalf("runInit() error: %v", err)
+	}
+
+	if gotAuth != "Bearer aw_sk_123456789012345678901234567890123456" {
+		t.Errorf("Authorization = %q, want Bearer with aw_sk_ API key", gotAuth)
+	}
 }

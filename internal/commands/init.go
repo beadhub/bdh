@@ -28,6 +28,7 @@ var (
 	initUpdate     bool
 	initInjectDocs bool
 	initSetupHooks bool
+	initAPIKey     string
 )
 
 var initCmd = &cobra.Command{
@@ -65,6 +66,7 @@ func init() {
 	initCmd.Flags().BoolVar(&initUpdate, "update", false, "Update workspace location (hostname/path) on server")
 	initCmd.Flags().BoolVar(&initInjectDocs, "inject-docs", false, "Inject bdh instructions into CLAUDE.md/AGENTS.md")
 	initCmd.Flags().BoolVar(&initSetupHooks, "setup-hooks", false, "Set up Claude Code hooks for chat notifications")
+	initCmd.Flags().StringVar(&initAPIKey, "api-key", "", "API key for non-interactive auth (skips email prompt)")
 }
 
 // isTTY returns true if stdin is a terminal.
@@ -418,10 +420,23 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 		}
 	}
 
+	// Validate --api-key format early (before any network calls)
+	if initAPIKey != "" {
+		if !strings.HasPrefix(initAPIKey, "bh_sk_") && !strings.HasPrefix(initAPIKey, "aw_sk_") {
+			return fmt.Errorf("invalid API key: must start with bh_sk_ or aw_sk_")
+		}
+		if len(initAPIKey) < 38 {
+			return fmt.Errorf("invalid API key: too short (expected at least 38 characters)")
+		}
+	}
+
 	// Get configuration with priority: CLI flag > env var > default
 	beadhubURL := resolveConfig(initURL, "BEADHUB_URL", "http://localhost:8000")
 	humanName := resolveConfig(initHuman, "BEADHUB_HUMAN", getDefaultHumanName())
-	email := os.Getenv("BEADHUB_EMAIL") // For Cloud (ignored by OSS)
+	email := ""
+	if initAPIKey == "" {
+		email = os.Getenv("BEADHUB_EMAIL") // For Cloud (ignored by OSS)
+	}
 
 	// Get role with priority: CLI flag > env var > prompt (TTY) > default
 	role := ""
@@ -513,7 +528,12 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 		initReq.ProjectSlug = projectSlug
 	}
 
-	c := client.New(beadhubURL)
+	var c *client.Client
+	if initAPIKey != "" {
+		c = client.NewWithAPIKey(beadhubURL, initAPIKey)
+	} else {
+		c = client.New(beadhubURL)
+	}
 
 	fmt.Println("Initializing workspace...")
 
@@ -522,6 +542,10 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 	if err != nil {
 		// Check for specific error codes
 		if clientErr, ok := err.(*client.Error); ok {
+			// API key auth: 401 means invalid/expired key — fail immediately
+			if initAPIKey != "" && clientErr.StatusCode == 401 {
+				return fmt.Errorf("API key invalid or expired. Generate a new one at https://app.beadhub.com/dashboard/cloud/keys")
+			}
 			// Parse error body for code
 			if strings.Contains(clientErr.Body, "project_not_found") {
 				// Repo not registered, need project_slug

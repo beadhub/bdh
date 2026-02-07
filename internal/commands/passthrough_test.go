@@ -1924,63 +1924,6 @@ func TestPassthrough_JumpInNotNeededWhenApproved(t *testing.T) {
 	}
 }
 
-func TestIsClaimCommand(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-		want bool
-	}{
-		{
-			name: "update with --status in_progress",
-			args: []string{"update", "bd-42", "--status", "in_progress"},
-			want: true,
-		},
-		{
-			name: "update with --status=in_progress",
-			args: []string{"update", "bd-42", "--status=in_progress"},
-			want: true,
-		},
-		{
-			name: "update with -s in_progress",
-			args: []string{"update", "bd-42", "-s", "in_progress"},
-			want: true,
-		},
-		{
-			name: "update with other status",
-			args: []string{"update", "bd-42", "--status", "closed"},
-			want: false,
-		},
-		{
-			name: "close command",
-			args: []string{"close", "bd-42"},
-			want: false,
-		},
-		{
-			name: "show command",
-			args: []string{"show", "bd-42"},
-			want: false,
-		},
-		{
-			name: "update without status",
-			args: []string{"update", "bd-42", "--priority", "1"},
-			want: false,
-		},
-		{
-			name: "empty args",
-			args: []string{},
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isClaimCommand(tt.args); got != tt.want {
-				t.Errorf("isClaimCommand(%v) = %v, want %v", tt.args, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestFormatPassthroughOutput_YourFocusNotRecentContext(t *testing.T) {
 	// Test that "Your Focus" is used instead of "RECENT CONTEXT"
 	result := &PassthroughResult{
