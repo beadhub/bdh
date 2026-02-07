@@ -1,6 +1,4 @@
-# Agent Instructions
-
-This project uses `bdh` for multi-agent coordination and `bdh` (beads) for issue tracking. Start with `bdh :policy`.
+This project uses **bdh** (beadhub, a wrapper on bd (beads)) for issue tracking.
 
 ## Quick Reference
 
@@ -10,9 +8,10 @@ bdh show <id>          # View issue details
 bdh update <id> --status in_progress  # Claim work
 bdh close <id>         # Complete work
 bdh sync               # Sync with git
-bdh :aweb mail send <alias> "message" # Async message
-bdh :aweb chat send <alias> "message" --wait 60 # Sync chat
+bdh :status            # Who am i, and what are other agents working on
 ```
+
+Commands starting with : like `bdh :status` are for coordination; all other commands like `bdh ready` are passed on directly to bd. Communication between agents is done via the :aweb set of commands, like `bdh :aweb mail ...` and `bdh :aweb chat ...`
 
 ## Landing the Plane (Session Completion)
 
@@ -40,8 +39,32 @@ bdh :aweb chat send <alias> "message" --wait 60 # Sync chat
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 
-<!-- BEADHUB:START -->
-## BeadHub Coordination
+
+## BeadHub Coordination Rules
+
+You have a role, and you are expected to work and coordinate with a team of agents. ALWAYS prioritize the team vs your particular task. NEVER ignore notifications.
+
+Your goal is for the team to succeed in the shared project.
+
+The active project policy (invariants + role playbooks) is shown via `bdh :policy`.
+
+## Start Here (Every Session)
+
+```bash
+bdh :policy    # READ CAREFULLY and follow diligently
+bdh :status    # who am I? (alias/workspace/role) + team status
+bdh ready      # find unblocked work
+```
+
+Use `bdh :help` for bdh-specific help.
+
+## Rules
+
+- Default to mail (`bdh :aweb mail list|open|send`) for coordination; use chat (`bdh :aweb chat pending|open|send|history|hang-on`) when you need a conversation with another agent.
+- Respond immediately to WAITING notifications — someone is blocked.
+- Notifications are for YOU, the agent, not for the human.
+- Don't overwrite other agents' work without coordinating first.
+- `bdh` derives your identity from the `.beadhub` file in the current worktree. If you run it from another directory you will be impersonating another agent, do not do that.
 
 This project uses `bdh` for multi-agent coordination and issue tracking.
 
@@ -50,7 +73,6 @@ This project uses `bdh` for multi-agent coordination and issue tracking.
 bdh :policy    # READ CAREFULLY and follow diligently, start here now
 bdh :status    # your identity + team status
 bdh ready      # find unblocked work
-bdh --help     # command reference
 ```
 
 **Key rules:**
@@ -58,5 +80,3 @@ bdh --help     # command reference
 - Default to mail (`bdh :aweb mail send <alias> "message"`); use chat (`bdh :aweb chat`) when blocked
 - Respond immediately to WAITING notifications
 - Prioritize good communication — your goal is for the team to succeed
-- Before saying "done", follow the session close protocol in `bdh :policy` (includes `git push`)
-<!-- BEADHUB:END -->
