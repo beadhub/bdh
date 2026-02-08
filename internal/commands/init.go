@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/awebai/aw/awconfig"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -44,8 +45,15 @@ Configuration sources (in priority order):
 1. Command line flags (--beadhub-url, --alias, --human, --project, --role)
 2. Environment variables (BEADHUB_URL, BEADHUB_ALIAS, BEADHUB_HUMAN, BEADHUB_PROJECT, BEADHUB_ROLE)
 3. .env file in current directory
-4. Interactive prompts (TTY mode only)
-5. Defaults (role: agent, alias: server-suggested, human: $USER)
+4. Stored credentials from previous init (~/.config/aw/config.yaml)
+5. Interactive prompts (TTY mode only)
+6. Defaults (role: agent, alias: server-suggested, human: $USER)
+
+API key resolution (for authentication):
+1. --api-key flag
+2. BEADHUB_API_KEY environment variable
+3. Stored key from ~/.config/aw/config.yaml (matching target server)
+4. No auth (falls back to email-based flow)
 
 Default alias format: <name>-<role> (e.g., alice-implementer, bob-reviewer).
 The server suggests a unique name prefix per project; you can override in TTY mode.
@@ -420,9 +428,15 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 		}
 	}
 
-	// Resolve API key: --api-key flag > BEADHUB_API_KEY env var
+	// Get configuration with priority: CLI flag > env var > default
+	beadhubURL := resolveConfig(initURL, "BEADHUB_URL", "http://localhost:8000")
+
+	// Resolve API key: --api-key flag > BEADHUB_API_KEY env > stored config > none
 	if initAPIKey == "" {
 		initAPIKey = strings.TrimSpace(os.Getenv("BEADHUB_API_KEY"))
+	}
+	if initAPIKey == "" {
+		initAPIKey = apiKeyFromStoredConfig(beadhubURL)
 	}
 
 	// Validate API key format early (before any network calls)
@@ -434,9 +448,6 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 			return fmt.Errorf("invalid API key: too short (expected at least 38 characters)")
 		}
 	}
-
-	// Get configuration with priority: CLI flag > env var > default
-	beadhubURL := resolveConfig(initURL, "BEADHUB_URL", "http://localhost:8000")
 	humanName := resolveConfig(initHuman, "BEADHUB_HUMAN", getDefaultHumanName())
 	email := ""
 	if initAPIKey == "" {
@@ -726,6 +737,37 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 	PrintClaudeHooksResult(hooksResult)
 
 	return nil
+}
+
+// apiKeyFromStoredConfig looks up an existing API key from the global aw config
+// for the given server URL. Prefers the default account if it matches the server;
+// otherwise returns the first matching account's key. Returns "" if none found.
+func apiKeyFromStoredConfig(beadhubURL string) string {
+	serverName, err := awconfig.DeriveServerNameFromURL(beadhubURL)
+	if err != nil {
+		return ""
+	}
+
+	cfg, err := awconfig.LoadGlobal()
+	if err != nil {
+		return ""
+	}
+
+	// Prefer the default account if it targets the same server
+	if cfg.DefaultAccount != "" {
+		if acct, ok := cfg.Accounts[cfg.DefaultAccount]; ok && acct.Server == serverName && acct.APIKey != "" {
+			return acct.APIKey
+		}
+	}
+
+	// Fall back to any account matching the server
+	for _, acct := range cfg.Accounts {
+		if acct.Server == serverName && acct.APIKey != "" {
+			return acct.APIKey
+		}
+	}
+
+	return ""
 }
 
 // runBeadsInit attempts to initialize beads issue tracking.

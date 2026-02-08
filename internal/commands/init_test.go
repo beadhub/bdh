@@ -963,6 +963,178 @@ func TestInitCommand_APIKeyAcceptsAwSkPrefix(t *testing.T) {
 	}
 }
 
+func TestInitCommand_APIKeyFromStoredConfig(t *testing.T) {
+	setupTempWorkspace(t)
+
+	var gotAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/init" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		gotAuth = r.Header.Get("Authorization")
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":           "ok",
+			"api_key":          "aw_sk_123456789012345678901234567890123456",
+			"project_id":       "proj-1",
+			"project_slug":     "test-project",
+			"repo_id":          "c3d4e5f6-7890-12cd-ef01-345678901234",
+			"canonical_origin": "github.com/test/repo",
+			"workspace_id":     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+			"alias":            "test-agent",
+			"created":          true,
+		})
+	}))
+	defer server.Close()
+
+	// Pre-seed global config with an existing account for this server
+	serverName, err := awconfig.DeriveServerNameFromURL(server.URL)
+	if err != nil {
+		t.Fatalf("derive server name: %v", err)
+	}
+	storedKey := "aw_sk_stored_config_key_234567890123456789"
+	if err := awconfig.UpdateGlobalAt(os.Getenv("AW_CONFIG_PATH"), func(gc *awconfig.GlobalConfig) error {
+		gc.Servers[serverName] = awconfig.Server{URL: server.URL}
+		gc.Accounts["existing-account"] = awconfig.Account{
+			Server:         serverName,
+			APIKey:         storedKey,
+			DefaultProject: "other-project",
+			AgentID:        "other-workspace-id",
+			AgentAlias:     "other-alias",
+		}
+		gc.DefaultAccount = "existing-account"
+		return nil
+	}); err != nil {
+		t.Fatalf("seed global config: %v", err)
+	}
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ALIAS", "test-agent")
+	t.Setenv("BEADHUB_HUMAN", "Test Human")
+	t.Setenv("BEADHUB_PROJECT", "test-project")
+	// No --api-key flag, no BEADHUB_API_KEY env var
+
+	if err := runInit(); err != nil {
+		t.Fatalf("runInit() error: %v", err)
+	}
+
+	if gotAuth != "Bearer "+storedKey {
+		t.Errorf("Authorization = %q, want Bearer with stored config key", gotAuth)
+	}
+}
+
+func TestInitCommand_APIKeyFromStoredConfig_PrefersDefaultAccount(t *testing.T) {
+	setupTempWorkspace(t)
+
+	var gotAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/init" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		gotAuth = r.Header.Get("Authorization")
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":           "ok",
+			"api_key":          "aw_sk_123456789012345678901234567890123456",
+			"project_id":       "proj-1",
+			"project_slug":     "test-project",
+			"repo_id":          "c3d4e5f6-7890-12cd-ef01-345678901234",
+			"canonical_origin": "github.com/test/repo",
+			"workspace_id":     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+			"alias":            "test-agent",
+			"created":          true,
+		})
+	}))
+	defer server.Close()
+
+	serverName, err := awconfig.DeriveServerNameFromURL(server.URL)
+	if err != nil {
+		t.Fatalf("derive server name: %v", err)
+	}
+	defaultKey := "aw_sk_default_account_key_567890123456789012"
+	otherKey := "aw_sk_other_account_key_8901234567890123456"
+	if err := awconfig.UpdateGlobalAt(os.Getenv("AW_CONFIG_PATH"), func(gc *awconfig.GlobalConfig) error {
+		gc.Servers[serverName] = awconfig.Server{URL: server.URL}
+		gc.Accounts["default-acct"] = awconfig.Account{
+			Server: serverName,
+			APIKey: defaultKey,
+		}
+		gc.Accounts["other-acct"] = awconfig.Account{
+			Server: serverName,
+			APIKey: otherKey,
+		}
+		gc.DefaultAccount = "default-acct"
+		return nil
+	}); err != nil {
+		t.Fatalf("seed global config: %v", err)
+	}
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ALIAS", "test-agent")
+	t.Setenv("BEADHUB_HUMAN", "Test Human")
+	t.Setenv("BEADHUB_PROJECT", "test-project")
+
+	if err := runInit(); err != nil {
+		t.Fatalf("runInit() error: %v", err)
+	}
+
+	if gotAuth != "Bearer "+defaultKey {
+		t.Errorf("Authorization = %q, want Bearer with default account key (not other account)", gotAuth)
+	}
+}
+
+func TestInitCommand_APIKeyFromStoredConfig_FallsBackOn401(t *testing.T) {
+	setupTempWorkspace(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/init" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"detail": "invalid_api_key",
+		})
+	}))
+	defer server.Close()
+
+	serverName, err := awconfig.DeriveServerNameFromURL(server.URL)
+	if err != nil {
+		t.Fatalf("derive server name: %v", err)
+	}
+	if err := awconfig.UpdateGlobalAt(os.Getenv("AW_CONFIG_PATH"), func(gc *awconfig.GlobalConfig) error {
+		gc.Servers[serverName] = awconfig.Server{URL: server.URL}
+		gc.Accounts["stale-acct"] = awconfig.Account{
+			Server: serverName,
+			APIKey: "aw_sk_expired_key_67890123456789012345678",
+		}
+		gc.DefaultAccount = "stale-acct"
+		return nil
+	}); err != nil {
+		t.Fatalf("seed global config: %v", err)
+	}
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ALIAS", "test-agent")
+	t.Setenv("BEADHUB_HUMAN", "Test Human")
+	t.Setenv("BEADHUB_PROJECT", "test-project")
+
+	err = runInit()
+	if err == nil {
+		t.Fatal("runInit() should error on 401 with stored key")
+	}
+	if !strings.Contains(err.Error(), "API key invalid or expired") {
+		t.Errorf("error should mention API key invalid or expired, got: %v", err)
+	}
+}
+
 func TestInitCommand_APIKeyFromEnvVar(t *testing.T) {
 	setupTempWorkspace(t)
 
