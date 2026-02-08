@@ -113,7 +113,7 @@ func TestFormatReservationsOutput_JSON(t *testing.T) {
 
 func TestFormatReservationsOutput_Warning(t *testing.T) {
 	result := &ReservationsResult{
-		Warning: "BeadHub unreachable at http://localhost:8000",
+		Warning: "BeadHub unreachable at https://app.beadhub.ai/api",
 	}
 
 	output := formatReservationsOutput(result, false)
@@ -125,12 +125,12 @@ func TestFormatReservationsOutput_Warning(t *testing.T) {
 
 func TestFormatReservationsOutput_JSONWarning(t *testing.T) {
 	result := &ReservationsResult{
-		Warning: "BeadHub unreachable at http://localhost:8000",
+		Warning: "BeadHub unreachable at https://app.beadhub.ai/api",
 	}
 
 	output := formatReservationsOutput(result, true)
 
-	if !strings.Contains(output, `"warning": "BeadHub unreachable at http://localhost:8000"`) {
+	if !strings.Contains(output, `"warning": "BeadHub unreachable at https://app.beadhub.ai/api"`) {
 		t.Errorf("Expected JSON output to contain warning, got: %s", output)
 	}
 }

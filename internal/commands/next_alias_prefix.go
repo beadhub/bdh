@@ -45,7 +45,7 @@ Use with bdh :add-worktree:
 
 func init() {
 	nextAliasPrefixCmd.Flags().BoolVar(&nextAliasPrefixJSON, "json", false, "Output as JSON")
-	nextAliasPrefixCmd.Flags().StringVar(&nextAliasPrefixURL, "beadhub-url", "", "BeadHub server URL (default: from config or http://localhost:8000)")
+	nextAliasPrefixCmd.Flags().StringVar(&nextAliasPrefixURL, "beadhub-url", "", "BeadHub server URL (default: from config or https://app.beadhub.ai/api)")
 }
 
 func runNextAliasPrefix(cmd *cobra.Command, args []string) error {
@@ -70,7 +70,7 @@ func runNextAliasPrefix(cmd *cobra.Command, args []string) error {
 		if cfg, err := config.Load(); err == nil && cfg.BeadhubURL != "" {
 			beadhubURL = cfg.BeadhubURL
 		} else {
-			beadhubURL = "http://localhost:8000"
+			beadhubURL = defaultBeadhubURL
 		}
 	}
 

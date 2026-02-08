@@ -55,7 +55,7 @@ Help:
   bdh :help              - Show only bdh help (not bd)
 
 Environment variables (for bdh :init):
-  BEADHUB_URL          - Server URL (default: http://localhost:8000)
+  BEADHUB_URL          - Server URL (default: https://app.beadhub.ai/api)
   BEADHUB_PROJECT      - Project slug (required if repo not registered)
   BEADHUB_ALIAS        - Workspace alias (default: auto-suggested)
   BEADHUB_ROLE         - Workspace role (default: agent)

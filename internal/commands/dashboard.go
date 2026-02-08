@@ -36,7 +36,7 @@ func init() {
 		&dashboardURL,
 		"dashboard-url",
 		"",
-		"Dashboard URL (default: BEADHUB_DASHBOARD_URL or BEADHUB_URL origin or http://localhost:8000/)",
+		"Dashboard URL (default: BEADHUB_DASHBOARD_URL or BEADHUB_URL origin or https://app.beadhub.ai/api/)",
 	)
 	dashboardCmd.Flags().BoolVar(
 		&dashboardOpen,
@@ -92,7 +92,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 			base = baseURLFromSelection
 		}
 		if base == "" {
-			base = "http://localhost:8000/"
+			base = defaultBeadhubURL + "/"
 		}
 	}
 	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {

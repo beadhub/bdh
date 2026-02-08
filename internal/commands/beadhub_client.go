@@ -83,7 +83,7 @@ func newBeadHubClient(beadhubURL string) *client.Client {
 	if err == nil && strings.TrimSpace(sel.BaseURL) != "" {
 		return client.New(sel.BaseURL)
 	}
-	return client.New(resolveConfig("", "BEADHUB_URL", "http://localhost:8000"))
+	return client.New(resolveConfig("", "BEADHUB_URL", defaultBeadhubURL))
 }
 
 func newBeadHubClientRequired(beadhubURL string) (*client.Client, error) {

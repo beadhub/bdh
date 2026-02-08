@@ -51,8 +51,8 @@ func TestDashboard_UsesAccountWhenEnvKeyMissing(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	serverName := "localhost:8000"
-	accountName := "acct-local"
+	serverName := "app.beadhub.ai"
+	accountName := "acct-prod"
 	apiKey := "aw_sk_test_123456789012345678901234567890123456"
 
 	if err := awconfig.UpdateGlobalAt(os.Getenv("AW_CONFIG_PATH"), func(cfg *awconfig.GlobalConfig) error {
@@ -62,7 +62,7 @@ func TestDashboard_UsesAccountWhenEnvKeyMissing(t *testing.T) {
 		if cfg.Accounts == nil {
 			cfg.Accounts = map[string]awconfig.Account{}
 		}
-		cfg.Servers[serverName] = awconfig.Server{URL: "http://localhost:8000"}
+		cfg.Servers[serverName] = awconfig.Server{URL: "https://app.beadhub.ai/api"}
 		cfg.Accounts[accountName] = awconfig.Account{
 			Server:         serverName,
 			APIKey:         apiKey,

@@ -10,6 +10,12 @@ import (
 // apiTimeout is the default timeout for API calls.
 const apiTimeout = 10 * time.Second
 
+// defaultBeadhubURL is used only when the user hasn't configured BEADHUB_URL,
+// no .beadhub exists, and no stored aw config exists.
+//
+// We intentionally default to the hosted service, not localhost.
+const defaultBeadhubURL = "https://app.beadhub.ai/api"
+
 // TTL constraints for reservations (used by auto-reserve).
 const (
 	reserveDefaultTTL = 300

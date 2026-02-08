@@ -88,7 +88,7 @@ func runProjectsList(cmd *cobra.Command, args []string) error {
 func listProjects() (*ProjectsListResult, error) {
 	// Load config to get BeadHub URL
 	cfg, err := config.Load()
-	beadhubURL := "http://localhost:8000" // default
+	beadhubURL := defaultBeadhubURL // default
 	if err != nil {
 		// Warn about using default URL - user may be hitting wrong server
 		fmt.Fprintf(os.Stderr, "Warning: No .beadhub config found, using default URL %s\n", beadhubURL)

@@ -429,7 +429,7 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 	}
 
 	// Get configuration with priority: CLI flag > env var > default
-	beadhubURL := resolveConfig(initURL, "BEADHUB_URL", "http://localhost:8000")
+	beadhubURL := resolveConfig(initURL, "BEADHUB_URL", defaultBeadhubURL)
 
 	// Resolve API key: --api-key flag > BEADHUB_API_KEY env > stored config > none
 	if initAPIKey == "" {
@@ -626,7 +626,8 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 	}
 
 	// Validate API key format before saving
-	if !strings.HasPrefix(initResp.APIKey, "aw_sk_") || len(initResp.APIKey) < 38 {
+	// Cloud returns bh_sk_* keys; OSS/aweb returns aw_sk_* keys.
+	if !(strings.HasPrefix(initResp.APIKey, "aw_sk_") || strings.HasPrefix(initResp.APIKey, "bh_sk_")) || len(initResp.APIKey) < 38 {
 		return fmt.Errorf("server returned malformed API key")
 	}
 

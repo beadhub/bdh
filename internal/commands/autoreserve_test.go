@@ -82,7 +82,7 @@ func TestConfig_SaveIncludesAutoReserveFields(t *testing.T) {
 	reserveUntracked := true
 	cfg := &config.Config{
 		WorkspaceID:      "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-		BeadhubURL:       "http://localhost:8000",
+		BeadhubURL:       "https://app.beadhub.ai/api",
 		ProjectSlug:      "test-project",
 		RepoID:           "c3d4e5f6-7890-12cd-ef01-345678901234",
 		RepoOrigin:       "git@github.com:test/repo.git",

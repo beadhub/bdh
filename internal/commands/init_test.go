@@ -188,6 +188,57 @@ func TestInitCommand_CreatesBeadhubFile(t *testing.T) {
 	}
 }
 
+func TestInitCommand_AcceptsBhSkAPIKey(t *testing.T) {
+	_ = setupTempWorkspace(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/init" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":           "ok",
+			"api_key":          "bh_sk_123456789012345678901234567890123456",
+			"project_id":       "test-project-uuid-1234",
+			"project_slug":     "test-project",
+			"repo_id":          "c3d4e5f6-7890-12cd-ef01-345678901234",
+			"canonical_origin": "github.com/test/repo",
+			"workspace_id":     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+			"alias":            "test-agent",
+			"created":          true,
+		})
+	}))
+	defer server.Close()
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ALIAS", "test-agent")
+	t.Setenv("BEADHUB_HUMAN", "Test Human")
+	t.Setenv("BEADHUB_PROJECT", "test-project")
+
+	if err := runInit(); err != nil {
+		t.Fatalf("runInit() error: %v", err)
+	}
+
+	ctxPath := filepath.Join(".", ".aw", "context")
+	ctx, err := awconfig.LoadWorktreeContextFrom(ctxPath)
+	if err != nil {
+		t.Fatalf("loading .aw/context: %v", err)
+	}
+
+	global, err := awconfig.LoadGlobal()
+	if err != nil {
+		t.Fatalf("loading aw global config: %v", err)
+	}
+	acct, ok := global.Accounts[ctx.DefaultAccount]
+	if !ok {
+		t.Fatalf("global config missing account %q", ctx.DefaultAccount)
+	}
+	if acct.APIKey != "bh_sk_123456789012345678901234567890123456" {
+		t.Fatalf("global account api_key=%q want %q", acct.APIKey, "bh_sk_123456789012345678901234567890123456")
+	}
+}
+
 func TestInitCommand_SucceedsIfAlreadyInitialized(t *testing.T) {
 	_ = setupTempWorkspace(t)
 

@@ -64,7 +64,7 @@ func TestEscalate(t *testing.T) {
 func TestEscalate_EmptySubject(t *testing.T) {
 	cfg := &config.Config{
 		WorkspaceID: "my-workspace-id",
-		BeadhubURL:  "http://localhost:8000",
+		BeadhubURL:  "https://app.beadhub.ai/api",
 		ProjectSlug: "test",
 		RepoOrigin:  "git@github.com:test/repo.git",
 		Alias:       "test-agent",
@@ -83,7 +83,7 @@ func TestEscalate_EmptySubject(t *testing.T) {
 func TestEscalate_EmptySituation(t *testing.T) {
 	cfg := &config.Config{
 		WorkspaceID: "my-workspace-id",
-		BeadhubURL:  "http://localhost:8000",
+		BeadhubURL:  "https://app.beadhub.ai/api",
 		ProjectSlug: "test",
 		RepoOrigin:  "git@github.com:test/repo.git",
 		Alias:       "test-agent",

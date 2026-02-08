@@ -589,7 +589,7 @@ func TestAddWorktree_InvalidExplicitAliasRejected(t *testing.T) {
 
 	cfg := &config.Config{
 		WorkspaceID:     "initial-workspace-id",
-		BeadhubURL:      "http://localhost:8000",
+		BeadhubURL:      "https://app.beadhub.ai/api",
 		ProjectSlug:     "test-project",
 		RepoID:          "initial-repo-id",
 		RepoOrigin:      "git@github.com:test/repo.git",

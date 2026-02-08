@@ -28,7 +28,7 @@ func TestResolveBeadhubAuth_FromGlobalConfigAndContext(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(`
 servers:
   beadhub:
-    url: http://localhost:8000
+    url: https://app.beadhub.ai/api
 accounts:
   acct:
     server: beadhub
@@ -44,7 +44,7 @@ default_account: acct
 	if err != nil {
 		t.Fatalf("resolveBeadhubAuth: %v", err)
 	}
-	if sel.BaseURL != "http://localhost:8000" {
+	if sel.BaseURL != "https://app.beadhub.ai/api" {
 		t.Fatalf("baseURL=%q", sel.BaseURL)
 	}
 	if sel.APIKey != "aw_sk_test" {
@@ -59,14 +59,14 @@ default_account: acct
 }
 
 func TestResolveBeadhubAuth_AllowsEnvOnly(t *testing.T) {
-	t.Setenv("BEADHUB_URL", "http://localhost:8000")
+	t.Setenv("BEADHUB_URL", "https://app.beadhub.ai/api")
 	t.Setenv("BEADHUB_API_KEY", "aw_sk_env")
 
 	sel, err := resolveBeadhubAuth("")
 	if err != nil {
 		t.Fatalf("resolveBeadhubAuth: %v", err)
 	}
-	if sel.BaseURL != "http://localhost:8000" {
+	if sel.BaseURL != "https://app.beadhub.ai/api" {
 		t.Fatalf("baseURL=%q", sel.BaseURL)
 	}
 	if sel.APIKey != "aw_sk_env" {

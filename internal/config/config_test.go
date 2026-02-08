@@ -17,7 +17,7 @@ func TestLoadAndSave(t *testing.T) {
 	// Create a config and save it
 	cfg := &Config{
 		WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-		BeadhubURL:      "http://localhost:8000",
+		BeadhubURL:      "https://app.beadhub.ai/api",
 		ProjectSlug:     "beadhub",
 		RepoID:          "b2c3d4e5-6789-01ab-cdef-234567890abc",
 		RepoOrigin:      "git@github.com:anthropic/beadhub.git",
@@ -99,8 +99,8 @@ func TestLoad_FindsConfigInGitRootFromSubdir(t *testing.T) {
 	}
 
 	// Write config at repo root.
-	data := []byte(`workspace_id: "a1b2c3d4-5678-90ab-cdef-1234567890ab"
-beadhub_url: "http://localhost:8000"
+data := []byte(`workspace_id: "a1b2c3d4-5678-90ab-cdef-1234567890ab"
+beadhub_url: "https://app.beadhub.ai/api"
 project_slug: "beadhub"
 repo_id: "b2c3d4e5-6789-01ab-cdef-234567890abc"
 repo_origin: "git@github.com:anthropic/beadhub.git"
@@ -234,7 +234,7 @@ func TestSetPath_ResetToDefault(t *testing.T) {
 	// Create default .beadhub
 	cfg := &Config{
 		WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-		BeadhubURL:      "http://localhost:8000",
+		BeadhubURL:      "https://app.beadhub.ai/api",
 		ProjectSlug:     "default-project",
 		RepoID:          "b2c3d4e5-6789-01ab-cdef-234567890abc",
 		RepoOrigin:      "git@github.com:test/repo.git",
@@ -291,7 +291,7 @@ func TestValidate(t *testing.T) {
 			name: "valid config with ssh repo origin",
 			cfg: Config{
 				WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:      "http://localhost:8000",
+				BeadhubURL:      "https://app.beadhub.ai/api",
 				ProjectSlug:     "beadhub",
 				RepoID:          "b2c3d4e5-6789-01ab-cdef-234567890abc",
 				RepoOrigin:      "git@github.com:anthropic/beadhub.git",
@@ -320,7 +320,7 @@ func TestValidate(t *testing.T) {
 			name: "valid config with two-word role",
 			cfg: Config{
 				WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:      "http://localhost:8000",
+				BeadhubURL:      "https://app.beadhub.ai/api",
 				ProjectSlug:     "beadhub",
 				RepoID:          "b2c3d4e5-6789-01ab-cdef-234567890abc",
 				RepoOrigin:      "git@github.com:anthropic/beadhub.git",
@@ -335,7 +335,7 @@ func TestValidate(t *testing.T) {
 			name: "role too many words",
 			cfg: Config{
 				WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:      "http://localhost:8000",
+				BeadhubURL:      "https://app.beadhub.ai/api",
 				ProjectSlug:     "beadhub",
 				RepoID:          "b2c3d4e5-6789-01ab-cdef-234567890abc",
 				RepoOrigin:      "git@github.com:anthropic/beadhub.git",
@@ -350,7 +350,7 @@ func TestValidate(t *testing.T) {
 			name: "role invalid characters",
 			cfg: Config{
 				WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:      "http://localhost:8000",
+				BeadhubURL:      "https://app.beadhub.ai/api",
 				ProjectSlug:     "beadhub",
 				RepoID:          "b2c3d4e5-6789-01ab-cdef-234567890abc",
 				RepoOrigin:      "git@github.com:anthropic/beadhub.git",
@@ -365,7 +365,7 @@ func TestValidate(t *testing.T) {
 			name: "role too long",
 			cfg: Config{
 				WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:      "http://localhost:8000",
+				BeadhubURL:      "https://app.beadhub.ai/api",
 				ProjectSlug:     "beadhub",
 				RepoID:          "b2c3d4e5-6789-01ab-cdef-234567890abc",
 				RepoOrigin:      "git@github.com:anthropic/beadhub.git",
@@ -379,7 +379,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "missing workspace_id",
 			cfg: Config{
-				BeadhubURL:  "http://localhost:8000",
+				BeadhubURL:  "https://app.beadhub.ai/api",
 				ProjectSlug: "beadhub",
 				RepoOrigin:  "git@github.com:anthropic/beadhub.git",
 				Alias:       "claude-code",
@@ -403,7 +403,7 @@ func TestValidate(t *testing.T) {
 			name: "invalid alias with spaces",
 			cfg: Config{
 				WorkspaceID: "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:  "http://localhost:8000",
+				BeadhubURL:  "https://app.beadhub.ai/api",
 				ProjectSlug: "beadhub",
 				RepoOrigin:  "git@github.com:anthropic/beadhub.git",
 				Alias:       "claude code",
@@ -415,7 +415,7 @@ func TestValidate(t *testing.T) {
 			name: "invalid alias starting with underscore",
 			cfg: Config{
 				WorkspaceID: "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:  "http://localhost:8000",
+				BeadhubURL:  "https://app.beadhub.ai/api",
 				ProjectSlug: "beadhub",
 				RepoOrigin:  "git@github.com:anthropic/beadhub.git",
 				Alias:       "_claude",
@@ -427,7 +427,7 @@ func TestValidate(t *testing.T) {
 			name: "invalid alias starting with dash",
 			cfg: Config{
 				WorkspaceID: "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:  "http://localhost:8000",
+				BeadhubURL:  "https://app.beadhub.ai/api",
 				ProjectSlug: "beadhub",
 				RepoOrigin:  "git@github.com:anthropic/beadhub.git",
 				Alias:       "-claude",
@@ -439,7 +439,7 @@ func TestValidate(t *testing.T) {
 			name: "invalid alias too long",
 			cfg: Config{
 				WorkspaceID: "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:  "http://localhost:8000",
+				BeadhubURL:  "https://app.beadhub.ai/api",
 				ProjectSlug: "beadhub",
 				RepoOrigin:  "git@github.com:anthropic/beadhub.git",
 				Alias:       "a" + strings.Repeat("b", 64),
@@ -451,7 +451,7 @@ func TestValidate(t *testing.T) {
 			name: "invalid project_slug with uppercase",
 			cfg: Config{
 				WorkspaceID: "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:  "http://localhost:8000",
+				BeadhubURL:  "https://app.beadhub.ai/api",
 				ProjectSlug: "BeadHub",
 				RepoOrigin:  "git@github.com:anthropic/beadhub.git",
 				Alias:       "claude-code",
@@ -463,7 +463,7 @@ func TestValidate(t *testing.T) {
 			name: "invalid human_name starting with number",
 			cfg: Config{
 				WorkspaceID: "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:  "http://localhost:8000",
+				BeadhubURL:  "https://app.beadhub.ai/api",
 				ProjectSlug: "beadhub",
 				RepoOrigin:  "git@github.com:anthropic/beadhub.git",
 				Alias:       "claude-code",
@@ -475,7 +475,7 @@ func TestValidate(t *testing.T) {
 			name: "valid human_name with digits after first letter",
 			cfg: Config{
 				WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:      "http://localhost:8000",
+				BeadhubURL:      "https://app.beadhub.ai/api",
 				ProjectSlug:     "beadhub",
 				RepoOrigin:      "git@github.com:anthropic/beadhub.git",
 				CanonicalOrigin: "github.com/anthropic/beadhub",
@@ -488,7 +488,7 @@ func TestValidate(t *testing.T) {
 			name: "invalid workspace_id not a uuid",
 			cfg: Config{
 				WorkspaceID: "not-a-uuid",
-				BeadhubURL:  "http://localhost:8000",
+				BeadhubURL:  "https://app.beadhub.ai/api",
 				ProjectSlug: "beadhub",
 				RepoOrigin:  "git@github.com:anthropic/beadhub.git",
 				Alias:       "claude-code",
@@ -500,7 +500,7 @@ func TestValidate(t *testing.T) {
 			name: "invalid uuid with uppercase",
 			cfg: Config{
 				WorkspaceID: "A1B2C3D4-5678-90AB-CDEF-1234567890AB",
-				BeadhubURL:  "http://localhost:8000",
+				BeadhubURL:  "https://app.beadhub.ai/api",
 				ProjectSlug: "beadhub",
 				RepoOrigin:  "git@github.com:anthropic/beadhub.git",
 				Alias:       "claude-code",
@@ -512,7 +512,7 @@ func TestValidate(t *testing.T) {
 			name: "missing repo_origin",
 			cfg: Config{
 				WorkspaceID: "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:  "http://localhost:8000",
+				BeadhubURL:  "https://app.beadhub.ai/api",
 				ProjectSlug: "beadhub",
 				Alias:       "claude-code",
 				HumanName:   "Juan",
@@ -523,7 +523,7 @@ func TestValidate(t *testing.T) {
 			name: "missing alias",
 			cfg: Config{
 				WorkspaceID: "a1b2c3d4-5678-90ab-cdef-1234567890ab",
-				BeadhubURL:  "http://localhost:8000",
+				BeadhubURL:  "https://app.beadhub.ai/api",
 				ProjectSlug: "beadhub",
 				RepoOrigin:  "git@github.com:anthropic/beadhub.git",
 				HumanName:   "Juan",

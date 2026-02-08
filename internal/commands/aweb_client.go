@@ -21,7 +21,7 @@ func newAwebClient(beadhubURL string) (*aweb.Client, error) {
 		baseURL = strings.TrimSpace(sel.BaseURL)
 	}
 	if baseURL == "" {
-		baseURL = "http://localhost:8000"
+		baseURL = defaultBeadhubURL
 	}
 	return aweb.New(baseURL)
 }
