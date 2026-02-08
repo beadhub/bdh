@@ -102,7 +102,8 @@ func listReservations() (*ReservationsResult, error) {
 	if err != nil {
 		var clientErr *client.Error
 		if errors.As(err, &clientErr) {
-			return nil, fmt.Errorf("BeadHub error (%d): %s", clientErr.StatusCode, clientErr.Body)
+			result.Warning = formatClientErr(err).Error()
+			return result, nil
 		}
 		result.Warning = fmt.Sprintf("BeadHub unreachable at %s", cfg.BeadhubURL)
 		return result, nil

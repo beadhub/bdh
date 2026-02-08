@@ -97,7 +97,7 @@ func createEscalationWithConfig(cfg *config.Config, subject, situation string) (
 	if err != nil {
 		var clientErr *client.Error
 		if errors.As(err, &clientErr) {
-			return nil, fmt.Errorf("BeadHub error (%d): %s", clientErr.StatusCode, clientErr.Body)
+			return nil, formatClientErr(err)
 		}
 		return nil, fmt.Errorf("failed to create escalation: %w", err)
 	}

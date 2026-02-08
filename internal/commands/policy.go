@@ -179,7 +179,7 @@ func fetchActivePolicyCachedWithConfig(cfg *config.Config, role string, onlySele
 				}
 				return result, nil
 			}
-			return nil, fmt.Errorf("BeadHub error (%d): %s", clientErr.StatusCode, clientErr.Body)
+			return nil, formatClientErr(fetchErr)
 		}
 
 		// Network/unreachable: fall back to cache if available.
@@ -264,7 +264,7 @@ func fetchActivePolicyWithConfig(cfg *config.Config, role string, onlySelected b
 			}
 		}
 		if errors.As(err, &clientErr) {
-			return nil, fmt.Errorf("BeadHub error (%d): %s", clientErr.StatusCode, clientErr.Body)
+			return nil, formatClientErr(err)
 		}
 		return nil, fmt.Errorf("failed to fetch policy: %w", err)
 	}

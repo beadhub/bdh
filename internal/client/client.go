@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -721,15 +722,12 @@ func (c *Client) ActivePolicyFetch(ctx context.Context, reqParams *ActivePolicyR
 		LastModified: resp.Header.Get("Last-Modified"),
 	}
 
-	if resp.StatusCode == http.StatusNotModified {
-		return meta, nil
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &Error{
-			StatusCode: resp.StatusCode,
-			Body:       string(respBodyBytes),
+		if resp.StatusCode == http.StatusNotModified {
+			return meta, nil
 		}
-	}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, c.newError(resp.StatusCode, string(respBodyBytes), "/v1/policies/active")
+		}
 
 	var policy ActivePolicyResponse
 	if err := json.Unmarshal(respBodyBytes, &policy); err != nil {
@@ -931,10 +929,51 @@ func (c *Client) ListLocks(ctx context.Context, req *ListLocksRequest) (*ListLoc
 type Error struct {
 	StatusCode int
 	Body       string
+	Hint       string
 }
 
 func (e *Error) Error() string {
-	return fmt.Sprintf("BeadHub error (status %d): %s", e.StatusCode, e.Body)
+	msg := fmt.Sprintf("BeadHub error (status %d): %s", e.StatusCode, e.Body)
+	if strings.TrimSpace(e.Hint) != "" {
+		msg += "\n\nHint: " + strings.TrimSpace(e.Hint)
+	}
+	return msg
+}
+
+func hintForMisconfiguredBaseURL(baseURL string, path string, statusCode int, body string) string {
+	if statusCode != http.StatusNotFound && statusCode != http.StatusMethodNotAllowed {
+		return ""
+	}
+	if !strings.HasPrefix(path, "/v1/") {
+		return ""
+	}
+
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+
+	// If BEADHUB_URL has no path (or just "/"), it's easy to accidentally point to the
+	// web app/landing page instead of the API base.
+	if u.Path != "" && u.Path != "/" {
+		return ""
+	}
+
+	trimmed := strings.ToLower(strings.TrimSpace(body))
+	if strings.HasPrefix(trimmed, "<!doctype") || strings.HasPrefix(trimmed, "<html") {
+		return "BEADHUB_URL appears to return HTML (a web page), not the BeadHub API."
+	}
+
+	// Don't auto-rewrite; just give a concrete example for Cloud.
+	return "BEADHUB_URL must point to the API base (not the web app). If you're using BeadHub Cloud, set BEADHUB_URL=https://app.beadhub.ai/api."
+}
+
+func (c *Client) newError(statusCode int, body string, path string) *Error {
+	return &Error{
+		StatusCode: statusCode,
+		Body:       body,
+		Hint:       hintForMisconfiguredBaseURL(c.baseURL, path, statusCode, body),
+	}
 }
 
 // post sends a POST request and decodes the JSON response.
@@ -980,10 +1019,7 @@ func (c *Client) postWithHeaders(ctx context.Context, path string, reqBody, resp
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &Error{
-			StatusCode: resp.StatusCode,
-			Body:       string(respBodyBytes),
-		}
+		return c.newError(resp.StatusCode, string(respBodyBytes), path)
 	}
 
 	if err := json.Unmarshal(respBodyBytes, respBody); err != nil {
@@ -1021,10 +1057,7 @@ func (c *Client) delete(ctx context.Context, path string, respBody any) error {
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &Error{
-			StatusCode: resp.StatusCode,
-			Body:       string(respBodyBytes),
-		}
+		return c.newError(resp.StatusCode, string(respBodyBytes), path)
 	}
 
 	if err := json.Unmarshal(respBodyBytes, respBody); err != nil {
@@ -1169,10 +1202,7 @@ func (c *Client) getWithHeaders(ctx context.Context, path string, params any, re
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &Error{
-			StatusCode: resp.StatusCode,
-			Body:       string(respBodyBytes),
-		}
+		return c.newError(resp.StatusCode, string(respBodyBytes), path)
 	}
 
 	if err := json.Unmarshal(respBodyBytes, respBody); err != nil {

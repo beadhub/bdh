@@ -105,7 +105,7 @@ func listProjects() (*ProjectsListResult, error) {
 	if err != nil {
 		var clientErr *client.Error
 		if errors.As(err, &clientErr) {
-			return nil, fmt.Errorf("BeadHub error (%d): %s", clientErr.StatusCode, clientErr.Body)
+			return nil, formatClientErr(err)
 		}
 		return nil, fmt.Errorf("failed to list projects: %w", err)
 	}
@@ -168,7 +168,7 @@ func runProjectsDelete(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		var clientErr *client.Error
 		if errors.As(err, &clientErr) {
-			return fmt.Errorf("BeadHub error (%d): %s", clientErr.StatusCode, clientErr.Body)
+			return formatClientErr(err)
 		}
 		return fmt.Errorf("failed to list projects: %w", err)
 	}
@@ -210,7 +210,7 @@ func runProjectsDelete(cmd *cobra.Command, args []string) error {
 			if clientErr.StatusCode == 404 {
 				return fmt.Errorf("project not found: %s", idOrSlug)
 			}
-			return fmt.Errorf("BeadHub error (%d): %s", clientErr.StatusCode, clientErr.Body)
+			return formatClientErr(err)
 		}
 		return fmt.Errorf("failed to delete project: %w", err)
 	}

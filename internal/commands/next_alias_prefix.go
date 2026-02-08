@@ -91,7 +91,7 @@ func runNextAliasPrefix(cmd *cobra.Command, args []string) error {
 			if clientErr.StatusCode == 409 {
 				return fmt.Errorf("repo exists in multiple projects. Use --project to specify which one during :init")
 			}
-			return fmt.Errorf("BeadHub error (%d): %s", clientErr.StatusCode, clientErr.Body)
+			return formatClientErr(err)
 		}
 		return fmt.Errorf("failed to get name prefix suggestion: %w", err)
 	}

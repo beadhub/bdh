@@ -127,7 +127,7 @@ func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
 	if err != nil {
 		var clientErr *client.Error
 		if errors.As(err, &clientErr) {
-			return nil, fmt.Errorf("BeadHub error (%d): %s", clientErr.StatusCode, clientErr.Body)
+			return nil, formatClientErr(err)
 		}
 		return nil, fmt.Errorf("failed to fetch team: %w", err)
 	}
