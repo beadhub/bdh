@@ -10,6 +10,7 @@ coverage.out
 # Workspace config
 .beadhub
 .beadhub-cache/
+.beads/
 .aw/
 .cache/
 
