@@ -83,7 +83,8 @@ func runPolicy(cmd *cobra.Command, args []string) error {
 		role = cfg.Role
 	}
 	if role == "" {
-		role = "implementer"
+		// Prefer the default shipped policy role in beadhub defaults.
+		role = "developer"
 	}
 	role = config.NormalizeRole(role)
 	if role == "" || !config.IsValidRole(role) {
@@ -246,9 +247,20 @@ func fetchActivePolicyWithConfig(cfg *config.Config, role string, onlySelected b
 	})
 	if err != nil {
 		var clientErr *client.Error
+		// If the workspace role no longer exists in the active policy (common when users
+		// rename/delete roles), don't break the CLI. Fall back to fetching the full policy
+		// without selecting a role, and let the caller format a warning.
 		if errors.As(err, &clientErr) && role != "" && clientErr.StatusCode == 400 {
-			if roles, rolesErr := fetchAvailablePolicyRolesWithConfig(cfg); rolesErr == nil && len(roles) > 0 {
-				return nil, fmt.Errorf("role %q rejected by server (available roles: %s)", role, strings.Join(roles, ", "))
+			fallbackOnlySelected := false
+			fallback, fbErr := c.ActivePolicy(ctx, &client.ActivePolicyRequest{
+				OnlySelected: &fallbackOnlySelected,
+			})
+			if fbErr == nil && fallback != nil {
+				return &PolicyResult{
+					Role:         role,
+					OnlySelected: fallbackOnlySelected,
+					Policy:       fallback,
+				}, nil
 			}
 		}
 		if errors.As(err, &clientErr) {
@@ -376,6 +388,25 @@ func formatPolicyPlain(result *PolicyResult) string {
 	}
 	sb.WriteString("\n")
 
+	// If no selected role playbook is present, treat this as "no policy associated with role"
+	// (e.g. role renamed/removed by user). Show available roles and how to fix.
+	if p.SelectedRole == nil {
+		available := make([]string, 0, len(p.Roles))
+		for k := range p.Roles {
+			available = append(available, k)
+		}
+		sort.Strings(available)
+		if len(available) > 0 {
+			sb.WriteString(fmt.Sprintf("No policy associated with role %q.\n", result.Role))
+			sb.WriteString(fmt.Sprintf("Available roles: %s\n", strings.Join(available, ", ")))
+			sb.WriteString("\n")
+			sb.WriteString("Fix:\n")
+			sb.WriteString(fmt.Sprintf("  bdh :init --role %s\n", available[0]))
+			sb.WriteString("\n")
+		}
+		return sb.String()
+	}
+
 	playbookRole := result.Role
 	playbookTitle := ""
 	playbookBody := ""
@@ -450,6 +481,24 @@ func formatPolicyMarkdown(result *PolicyResult) string {
 			playbookRole = p.SelectedRole.Role
 		}
 		playbookBody = p.SelectedRole.PlaybookMD
+	}
+
+	// See formatPolicyPlain: when the role doesn't exist in the active policy bundle, don't
+	// fail the command; show available roles and how to fix.
+	if p.SelectedRole == nil {
+		available := make([]string, 0, len(p.Roles))
+		for k := range p.Roles {
+			available = append(available, k)
+		}
+		sort.Strings(available)
+		if len(available) > 0 {
+			sb.WriteString(fmt.Sprintf("> **No policy associated with role** `%s`.\n\n", result.Role))
+			sb.WriteString(fmt.Sprintf("- Available roles: %s\n", strings.Join(available, ", ")))
+			sb.WriteString("\n")
+			sb.WriteString("Fix:\n")
+			sb.WriteString(fmt.Sprintf("```bash\nbdh :init --role %s\n```\n", available[0]))
+		}
+		return sb.String()
 	}
 
 	sb.WriteString(fmt.Sprintf("## Role playbook (%s)\n", playbookRole))

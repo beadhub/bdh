@@ -162,12 +162,20 @@ func TestFetchActivePolicyWithConfig_UnknownRoleListsAvailableRoles(t *testing.T
 		BeadhubURL: server.URL,
 	}
 
-	_, err := fetchActivePolicyWithConfig(cfg, "unknown-role", false)
-	if err == nil {
-		t.Fatalf("expected error")
+	result, err := fetchActivePolicyWithConfig(cfg, "unknown-role", false)
+	if err != nil {
+		t.Fatalf("expected fallback to succeed, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "available roles: coordinator, reviewer") {
-		t.Fatalf("expected available roles in error, got: %v", err)
+	if result == nil || result.Policy == nil {
+		t.Fatalf("expected policy result")
+	}
+	// Unknown role should not produce a selected role playbook.
+	if result.Policy.SelectedRole != nil {
+		t.Fatalf("expected selected_role to be nil on fallback")
+	}
+	out := formatPolicyOutput(result, false, "plain")
+	if !strings.Contains(out, `No policy associated with role "unknown-role".`) {
+		t.Fatalf("expected warning in output, got: %s", out)
 	}
 }
 
