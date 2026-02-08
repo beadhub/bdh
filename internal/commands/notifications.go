@@ -214,7 +214,7 @@ func FormatNotifications(ctx *NotificationContext, excludeAlias string) string {
 			continue
 		}
 		seen[alias] = struct{}{}
-		lines = append(lines, fmt.Sprintf("- **URGENT**: %s is waiting for your response\n  → Respond now: `bdh :aweb chat send %s \"your reply\"`", alias, alias))
+		lines = append(lines, fmt.Sprintf("- **URGENT**: %s is waiting for your response\n  → Respond now: `bdh :aweb chat send-and-wait %s \"your reply\"`", alias, alias))
 	}
 
 	// CHATS: non-waiting with unread

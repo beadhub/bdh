@@ -1153,7 +1153,7 @@ func formatReservedFiles(result *PassthroughResult) string {
 			sb.WriteString(fmt.Sprintf("- `%s` — %s (expires in %s)\n", conflict.ResourceKey, conflict.HeldBy, expiresIn))
 		}
 		sb.WriteString("\nYour options:\n")
-		sb.WriteString("- Coordinate: `bdh :aweb chat send <alias> \"Need <path>...\"`\n")
+		sb.WriteString("- Coordinate: `bdh :aweb chat send-and-wait <alias> \"Need <path>...\"`\n")
 		sb.WriteString("- Stash your changes: `git stash`\n")
 		sb.WriteString("- Wait for expiry\n")
 	}

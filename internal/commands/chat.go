@@ -25,7 +25,6 @@ var (
 	chatWait              int
 	chatListenWait        int
 	chatStartConversation bool
-	chatLeaveConversation bool
 )
 
 var chatCmd = &cobra.Command{
@@ -42,22 +41,21 @@ Agent name supports fuzzy matching:
   3. Unique substring match (e.g., "main" -> "claude-main")
 
 Examples:
-  bdh :aweb chat send bob "Can you help with the API design?" --start-conversation
-  bdh :aweb chat send bob "Yes, here's my suggestion..."
-  bdh :aweb chat send bob "Thanks, I'm done here." --leave-conversation
+  bdh :aweb chat send-and-wait bob "Can you help with the API design?" --start-conversation
+  bdh :aweb chat send-and-wait bob "Yes, here's my suggestion..."
+  bdh :aweb chat send-and-leave bob "Thanks, I'm done here."
   bdh :aweb chat open bob
   bdh :aweb chat pending
   bdh :aweb chat history bob`,
 }
 
-var chatSendCmd = &cobra.Command{
-	Use:   "send <alias> <message>",
-	Short: "Send a message in a chat session",
-	Long: `Send a message to one or more agents in a persistent chat session.
+var chatSendAndWaitCmd = &cobra.Command{
+	Use:   "send-and-wait <alias> <message>",
+	Short: "Send a message and wait for a reply",
+	Long: `Send a message to one or more agents in a persistent chat session and wait for a reply.
 
 By default, waits 120 seconds for a reply. Use --start-conversation for
-a 5-minute wait when initiating a new exchange. Use --leave-conversation
-to send a final message and exit immediately.`,
+a 5-minute wait when initiating a new exchange.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
@@ -69,17 +67,6 @@ to send a final message and exit immediately.`,
 		}
 		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
 			return err
-		}
-
-		if chatStartConversation && chatLeaveConversation {
-			return fmt.Errorf("--start-conversation and --leave-conversation are mutually exclusive")
-		}
-
-		if chatLeaveConversation {
-			if cmd.Flags().Changed("wait") && chatWait != 0 {
-				return fmt.Errorf("--leave-conversation cannot be combined with --wait (it always exits immediately)")
-			}
-			chatWait = 0
 		}
 
 		if chatStartConversation && cmd.Flags().Changed("wait") && chatWait == 0 {
@@ -107,8 +94,59 @@ to send a final message and exit immediately.`,
 		opts := chat.SendOptions{
 			Wait:              chatWait,
 			WaitExplicit:      cmd.Flags().Changed("wait"),
-			Leaving:           chatLeaveConversation,
 			StartConversation: chatStartConversation,
+		}
+
+		ctx, cancel := context.WithTimeout(baseCtx, chat.MaxSendTimeout)
+		defer cancel()
+
+		result, err := chat.Send(ctx, aw, cfg.Alias, targetAgents, args[1], opts, chatStatusCallback)
+		if err != nil {
+			return err
+		}
+		fmt.Print(formatChatOutput(result, chatJSON))
+		return nil
+	},
+}
+
+var chatSendAndLeaveCmd = &cobra.Command{
+	Use:   "send-and-leave <alias> <message>",
+	Short: "Send a message and leave the conversation",
+	Long:  `Send a final message and exit the conversation immediately without waiting for a reply.`,
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("invalid .beadhub config: %w", err)
+		}
+		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
+			return err
+		}
+
+		if strings.TrimSpace(args[1]) == "" {
+			return fmt.Errorf("message cannot be empty")
+		}
+
+		baseCtx := cmd.Context()
+		targetAgents, err := resolveTargetAliases(baseCtx, cfg, args[0])
+		if err != nil {
+			return err
+		}
+		for _, t := range targetAgents {
+			SetExcludeChatAlias(t)
+		}
+
+		aw, err := newAwebClientRequired(cfg.BeadhubURL)
+		if err != nil {
+			return err
+		}
+
+		opts := chat.SendOptions{
+			Wait:    0,
+			Leaving: true,
 		}
 
 		ctx, cancel := context.WithTimeout(baseCtx, chat.MaxSendTimeout)
@@ -233,8 +271,8 @@ var chatHistoryCmd = &cobra.Command{
 	},
 }
 
-var chatHangOnCmd = &cobra.Command{
-	Use:   "hang-on <alias> <message>",
+var chatExtendWaitCmd = &cobra.Command{
+	Use:   "extend-wait <alias> <message>",
 	Short: "Request more time before replying",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -271,7 +309,7 @@ var chatHangOnCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Print(formatHangOnOutput(result, chatJSON))
+		fmt.Print(formatExtendWaitOutput(result, chatJSON))
 		return nil
 	},
 }
@@ -321,18 +359,18 @@ or the wait timeout elapses.`,
 }
 
 func init() {
-	chatCmd.AddCommand(chatSendCmd)
+	chatCmd.AddCommand(chatSendAndWaitCmd)
+	chatCmd.AddCommand(chatSendAndLeaveCmd)
 	chatCmd.AddCommand(chatPendingCmd)
 	chatCmd.AddCommand(chatOpenCmd)
 	chatCmd.AddCommand(chatHistoryCmd)
-	chatCmd.AddCommand(chatHangOnCmd)
+	chatCmd.AddCommand(chatExtendWaitCmd)
 	chatCmd.AddCommand(chatListenCmd)
 
 	chatCmd.PersistentFlags().BoolVar(&chatJSON, "json", false, "Output in JSON format")
 
-	chatSendCmd.Flags().IntVar(&chatWait, "wait", defaultChatWait, "Timeout in seconds (0 to not wait)")
-	chatSendCmd.Flags().BoolVar(&chatStartConversation, "start-conversation", false, "Initiate a new exchange (5 min wait)")
-	chatSendCmd.Flags().BoolVar(&chatLeaveConversation, "leave-conversation", false, "Send final message and exit (no wait)")
+	chatSendAndWaitCmd.Flags().IntVar(&chatWait, "wait", defaultChatWait, "Timeout in seconds (0 to not wait)")
+	chatSendAndWaitCmd.Flags().BoolVar(&chatStartConversation, "start-conversation", false, "Initiate a new exchange (5 min wait)")
 
 	chatListenCmd.Flags().IntVar(&chatListenWait, "wait", defaultChatWait, "Seconds to wait for a message (0 = no wait)")
 }
@@ -396,7 +434,7 @@ func chatStatusCallback(kind, message string) {
 	}
 }
 
-// formatChatOutput formats the chat send result for display.
+// formatChatOutput formats the chat send-and-wait/send-and-leave result for display.
 func formatChatOutput(result *chat.SendResult, asJSON bool) string {
 	if asJSON {
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -446,7 +484,7 @@ func formatChatOutput(result *chat.SendResult, asJSON bool) string {
 				sb.WriteString("Status: WAITING for your reply\n")
 			}
 			sb.WriteString(fmt.Sprintf("Body: %s\n", result.Reply))
-			sb.WriteString(fmt.Sprintf("Next: Run \"bdh :aweb chat send %s \\\"your reply\\\"\"\n", result.TargetAgent))
+			sb.WriteString(fmt.Sprintf("Next: Run \"bdh :aweb chat send-and-wait %s \\\"your reply\\\"\"\n", result.TargetAgent))
 		} else {
 			writeChatLine("Chat to", result.TargetAgent, firstTimestamp)
 			sb.WriteString(fmt.Sprintf("Body: %s\n", result.Reply))
@@ -467,7 +505,7 @@ func formatChatOutput(result *chat.SendResult, asJSON bool) string {
 	case "targets_left":
 		sb.WriteString(fmt.Sprintf("Message sent to %s\n", result.TargetAgent))
 		sb.WriteString(fmt.Sprintf("%s previously left the conversation.\n", result.TargetAgent))
-		sb.WriteString(fmt.Sprintf("To start a new exchange, run: \"bdh :aweb chat send %s \\\"message\\\" --start-conversation\"\n", result.TargetAgent))
+		sb.WriteString(fmt.Sprintf("To start a new exchange, run: \"bdh :aweb chat send-and-wait %s \\\"message\\\" --start-conversation\"\n", result.TargetAgent))
 		return sb.String()
 	}
 
@@ -635,24 +673,24 @@ func formatChatOpenOutput(result *chat.OpenResult, asJSON bool) string {
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("\nNext: Run \"bdh :aweb chat send %s \\\"your reply\\\"\"", result.TargetAgent))
+	sb.WriteString(fmt.Sprintf("\nNext: Run \"bdh :aweb chat send-and-wait %s \\\"your reply\\\"\"", result.TargetAgent))
 	if result.SenderWaiting {
-		sb.WriteString(fmt.Sprintf(" or \"bdh :aweb chat hang-on %s \\\"message\\\"\"", result.TargetAgent))
+		sb.WriteString(fmt.Sprintf(" or \"bdh :aweb chat extend-wait %s \\\"message\\\"\"", result.TargetAgent))
 	}
 	sb.WriteString("\n")
 
 	return sb.String()
 }
 
-// formatHangOnOutput formats the hang-on result for display.
-func formatHangOnOutput(result *chat.HangOnResult, asJSON bool) string {
+// formatExtendWaitOutput formats the extend-wait result for display.
+func formatExtendWaitOutput(result *chat.HangOnResult, asJSON bool) string {
 	if asJSON {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return string(data) + "\n"
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Sent hang-on to %s\n", result.TargetAgent))
+	sb.WriteString(fmt.Sprintf("Sent extend-wait to %s\n", result.TargetAgent))
 	sb.WriteString(fmt.Sprintf("Message: %s\n", result.Message))
 	if result.ExtendsWaitSeconds > 0 {
 		minutes := result.ExtendsWaitSeconds / 60

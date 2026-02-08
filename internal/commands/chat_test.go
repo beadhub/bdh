@@ -117,8 +117,8 @@ func TestFormatChatOutput_Pending_FromTarget(t *testing.T) {
 	if !strings.Contains(out, "WAITING for your reply") {
 		t.Errorf("expected waiting status, got: %q", out)
 	}
-	if !strings.Contains(out, "chat send bob") {
-		t.Errorf("expected send hint, got: %q", out)
+	if !strings.Contains(out, "chat send-and-wait bob") {
+		t.Errorf("expected send-and-wait hint, got: %q", out)
 	}
 }
 
@@ -372,11 +372,11 @@ func TestFormatChatOpenOutput_WithMessages(t *testing.T) {
 	if !strings.Contains(out, "---") {
 		t.Errorf("expected separator between messages, got: %q", out)
 	}
-	if !strings.Contains(out, "chat send alice") {
-		t.Errorf("expected send hint, got: %q", out)
+	if !strings.Contains(out, "chat send-and-wait alice") {
+		t.Errorf("expected send-and-wait hint, got: %q", out)
 	}
-	if !strings.Contains(out, "chat hang-on") {
-		t.Errorf("expected hang-on hint for waiting sender, got: %q", out)
+	if !strings.Contains(out, "chat extend-wait") {
+		t.Errorf("expected extend-wait hint for waiting sender, got: %q", out)
 	}
 }
 
@@ -409,12 +409,12 @@ func TestFormatChatOpenOutput_NotWaiting(t *testing.T) {
 	if strings.Contains(out, "WAITING") {
 		t.Errorf("should not show WAITING when sender is not waiting, got: %q", out)
 	}
-	if strings.Contains(out, "chat hang-on") {
-		t.Errorf("should not suggest hang-on when not waiting, got: %q", out)
+	if strings.Contains(out, "chat extend-wait") {
+		t.Errorf("should not suggest extend-wait when not waiting, got: %q", out)
 	}
 }
 
-func TestFormatHangOnOutput(t *testing.T) {
+func TestFormatExtendWaitOutput(t *testing.T) {
 	result := &chat.HangOnResult{
 		SessionID:          "s1",
 		TargetAgent:        "bob",
@@ -422,9 +422,9 @@ func TestFormatHangOnOutput(t *testing.T) {
 		ExtendsWaitSeconds: 300,
 	}
 
-	out := formatHangOnOutput(result, false)
-	if !strings.Contains(out, "Sent hang-on to bob") {
-		t.Errorf("expected hang-on header, got: %q", out)
+	out := formatExtendWaitOutput(result, false)
+	if !strings.Contains(out, "Sent extend-wait to bob") {
+		t.Errorf("expected extend-wait header, got: %q", out)
 	}
 	if !strings.Contains(out, "Message: Working on it...") {
 		t.Errorf("expected message, got: %q", out)
@@ -434,7 +434,7 @@ func TestFormatHangOnOutput(t *testing.T) {
 	}
 }
 
-func TestFormatHangOnOutput_NoExtension(t *testing.T) {
+func TestFormatExtendWaitOutput_NoExtension(t *testing.T) {
 	result := &chat.HangOnResult{
 		SessionID:          "s1",
 		TargetAgent:        "bob",
@@ -442,13 +442,13 @@ func TestFormatHangOnOutput_NoExtension(t *testing.T) {
 		ExtendsWaitSeconds: 0,
 	}
 
-	out := formatHangOnOutput(result, false)
+	out := formatExtendWaitOutput(result, false)
 	if strings.Contains(out, "extended") {
 		t.Errorf("should not show extension when 0, got: %q", out)
 	}
 }
 
-func TestFormatHangOnOutput_JSON(t *testing.T) {
+func TestFormatExtendWaitOutput_JSON(t *testing.T) {
 	result := &chat.HangOnResult{
 		SessionID:          "s1",
 		TargetAgent:        "bob",
@@ -456,7 +456,7 @@ func TestFormatHangOnOutput_JSON(t *testing.T) {
 		ExtendsWaitSeconds: 300,
 	}
 
-	out := formatHangOnOutput(result, true)
+	out := formatExtendWaitOutput(result, true)
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)

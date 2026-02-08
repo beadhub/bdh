@@ -57,7 +57,7 @@ bdh :aweb mail send alice "Login bug fixed."
 bdh :aweb mail list
 
 # Chat (sync) — when you need an answer to proceed
-bdh :aweb chat send alice "Quick question..." --wait 300
+bdh :aweb chat send-and-wait alice "Quick question..." --wait 300
 bdh :aweb chat pending
 ```
 

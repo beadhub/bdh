@@ -75,7 +75,7 @@ git push
 ## Communication
 
 - Default to mail (` + "`bdh :aweb mail send <alias> \"message\"`" + `) for async coordination
-- Use chat (` + "`bdh :aweb chat send <alias> \"message\" --start-conversation`" + `) when blocked and need immediate response
+- Use chat (` + "`bdh :aweb chat send-and-wait <alias> \"message\" --start-conversation`" + `) when blocked and need immediate response
 - Respond immediately to WAITING notifications
 ` + bdhMarkerEnd
 
