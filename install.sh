@@ -552,9 +552,11 @@ run_init_with_api_key() {
     fi
     echo ""
     log_info "API key detected, running bdh :init..."
-    if ! BEADHUB_API_KEY="$api_key" bdh :init; then
+    # Use --refresh-key so rerunning the installer repairs coordination state in an
+    # already-initialized workspace (e.g., when an unbound project key was used).
+    if ! BEADHUB_API_KEY="$api_key" bdh :init --refresh-key; then
         log_warning "bdh :init failed. You can retry manually:"
-        echo "  BEADHUB_API_KEY=<your-key> bdh :init"
+        echo "  BEADHUB_API_KEY=<your-key> bdh :init --refresh-key"
     fi
 }
 

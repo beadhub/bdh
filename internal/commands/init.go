@@ -29,6 +29,7 @@ var (
 	initUpdate     bool
 	initInjectDocs bool
 	initSetupHooks bool
+	initRefreshKey bool
 	initAPIKey     string
 )
 
@@ -47,7 +48,7 @@ Configuration sources (in priority order):
 3. .env file in current directory
 4. Stored credentials from previous init (~/.config/aw/config.yaml)
 5. Interactive prompts (TTY mode only)
-6. Defaults (role: agent, alias: server-suggested, human: $USER)
+6. Defaults (role: developer, alias: server-suggested, human: $USER)
 
 API key resolution (for authentication):
 1. --api-key flag
@@ -74,6 +75,7 @@ func init() {
 	initCmd.Flags().BoolVar(&initUpdate, "update", false, "Update workspace location (hostname/path) on server")
 	initCmd.Flags().BoolVar(&initInjectDocs, "inject-docs", false, "Inject bdh instructions into CLAUDE.md/AGENTS.md")
 	initCmd.Flags().BoolVar(&initSetupHooks, "setup-hooks", false, "Set up Claude Code hooks for chat notifications")
+	initCmd.Flags().BoolVar(&initRefreshKey, "refresh-key", false, "Refresh the workspace API key (Cloud; fixes coordination 403s)")
 	initCmd.Flags().StringVar(&initAPIKey, "api-key", "", "API key for non-interactive auth (skips email prompt)")
 }
 
@@ -122,6 +124,28 @@ func runInit() error {
 		}
 
 		if !initUpdate {
+			// Explicit Cloud repair path (coordination 403s on unbound keys).
+			if initRefreshKey {
+				return refreshWorkspaceKeyAndConfig(cfg)
+			}
+
+			// Allow updating role locally even when already initialized.
+			if initRole != "" {
+				role := config.NormalizeRole(initRole)
+				if !config.IsValidRole(role) {
+					return fmt.Errorf("invalid role: use 1-2 words (letters/numbers) with hyphens/underscores allowed; max 50 chars")
+				}
+				if role != cfg.Role {
+					cfg.Role = role
+					if err := cfg.Save(); err != nil {
+						return fmt.Errorf("failed to save config: %w", err)
+					}
+				}
+				fmt.Println("Updated local role")
+				fmt.Printf("  role: %s\n", cfg.Role)
+				return nil
+			}
+
 			// No --update flag: just print info and exit
 			wd, _ := os.Getwd()
 			fmt.Printf("BeadHub workspace already initialized at %s/%s\n", wd, config.FileName)
@@ -271,7 +295,7 @@ func promptForRole(availableRoles []string) (string, error) {
 		}
 	}
 
-	defaultRole := "agent"
+	defaultRole := "developer"
 	for {
 		fmt.Printf("Workspace role [%s]: ", defaultRole)
 		input, err := reader.ReadString('\n')
@@ -474,7 +498,7 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 			return fmt.Errorf("getting role: %w", err)
 		}
 	} else {
-		role = "agent"
+		role = "developer"
 	}
 
 	// Get alias with priority: CLI flag > env var > prompt (TTY) > default
@@ -769,6 +793,118 @@ func apiKeyFromStoredConfig(beadhubURL string) string {
 	}
 
 	return ""
+}
+
+func refreshWorkspaceKeyAndConfig(cfg *config.Config) error {
+	// Determine target URL: allow override for migrating between envs.
+	beadhubURL := resolveConfig(initURL, "BEADHUB_URL", cfg.BeadhubURL)
+
+	// Resolve API key: --api-key flag > BEADHUB_API_KEY env > stored config.
+	apiKey := strings.TrimSpace(initAPIKey)
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(os.Getenv("BEADHUB_API_KEY"))
+	}
+	if apiKey == "" {
+		apiKey = apiKeyFromStoredConfig(beadhubURL)
+	}
+	if apiKey == "" {
+		return fmt.Errorf("missing beadhub API key (configure ~/.config/aw/config.yaml + .aw/context, or set BEADHUB_API_KEY)")
+	}
+
+	// Role override (stored in .beadhub and sent to server on init).
+	role := cfg.Role
+	if initRole != "" {
+		role = config.NormalizeRole(initRole)
+		if !config.IsValidRole(role) {
+			return fmt.Errorf("invalid role: use 1-2 words (letters/numbers) with hyphens/underscores allowed; max 50 chars")
+		}
+	}
+	if strings.TrimSpace(role) == "" {
+		role = "developer"
+	}
+
+	repoOrigin := currentRepoOriginBestEffort(cfg)
+
+	humanName := cfg.HumanName
+	if initHuman != "" {
+		humanName = initHuman
+	}
+	if strings.TrimSpace(humanName) == "" {
+		humanName = getDefaultHumanName()
+	}
+
+	hostname, _ := os.Hostname()
+	workspacePath, _ := os.Getwd()
+
+	alias := cfg.Alias
+	initReq := &client.InitRequest{
+		RepoOrigin:    repoOrigin,
+		Alias:         &alias,
+		HumanName:     humanName,
+		Role:          role,
+		Hostname:      hostname,
+		WorkspacePath: workspacePath,
+	}
+
+	c := client.NewWithAPIKey(beadhubURL, apiKey)
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+	initResp, err := c.Init(ctx, initReq)
+	if err != nil {
+		return fmt.Errorf("failed to refresh workspace authentication: %w", err)
+	}
+	if strings.TrimSpace(initResp.WorkspaceID) != "" && initResp.WorkspaceID != cfg.WorkspaceID {
+		return fmt.Errorf(
+			"account/workspace mismatch: selected account agent_id=%q but .beadhub workspace_id=%q (check .aw/context)",
+			initResp.WorkspaceID,
+			cfg.WorkspaceID,
+		)
+	}
+
+	// Update local config to reflect any server canonicalization.
+	cfg.BeadhubURL = beadhubURL
+	if strings.TrimSpace(initResp.ProjectSlug) != "" {
+		cfg.ProjectSlug = initResp.ProjectSlug
+	}
+	if strings.TrimSpace(initResp.RepoID) != "" {
+		cfg.RepoID = initResp.RepoID
+	}
+	cfg.RepoOrigin = repoOrigin
+	if strings.TrimSpace(initResp.CanonicalOrigin) != "" {
+		cfg.CanonicalOrigin = initResp.CanonicalOrigin
+	}
+	if strings.TrimSpace(initResp.Alias) != "" {
+		cfg.Alias = initResp.Alias
+	}
+	cfg.HumanName = humanName
+	cfg.Role = role
+
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	accountName, serverName, err := persistBeadhubAccountAndContext(
+		beadhubURL,
+		cfg.ProjectSlug,
+		cfg.Alias,
+		initResp.APIKey,
+		cfg.WorkspaceID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to persist account/context: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("Refreshed BeadHub workspace authentication")
+	fmt.Printf("  beadhub_url: %s\n", cfg.BeadhubURL)
+	fmt.Printf("  project_slug: %s\n", cfg.ProjectSlug)
+	fmt.Printf("  alias: %s\n", cfg.Alias)
+	fmt.Printf("  role: %s\n", cfg.Role)
+	fmt.Printf("  account: %s (server: %s)\n", accountName, serverName)
+	return nil
 }
 
 // runBeadsInit attempts to initialize beads issue tracking.
