@@ -58,7 +58,7 @@ Environment variables (for bdh :init):
   BEADHUB_URL          - Server URL (default: https://app.beadhub.ai/api)
   BEADHUB_PROJECT      - Project slug (required if repo not registered)
   BEADHUB_ALIAS        - Workspace alias (default: auto-suggested)
-  BEADHUB_ROLE         - Workspace role (default: agent)
+  BEADHUB_ROLE         - Workspace role (default: implementer)
   BEADHUB_HUMAN        - Human name (default: $USER)
   BEADHUB_REPO_ORIGIN  - Override git remote origin (testing only)`,
 	// Don't show usage/errors on errors from subcommands (main.go handles errors)

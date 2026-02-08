@@ -19,6 +19,19 @@ import (
 	"github.com/beadhub/bdh/internal/sync"
 )
 
+const workspaceKeyMismatchDetail = "workspace_id does not match API key identity"
+
+func isWorkspaceKeyMismatch(err error) bool {
+	var clientErr *client.Error
+	if !errors.As(err, &clientErr) {
+		return false
+	}
+	if clientErr.StatusCode != 403 {
+		return false
+	}
+	return strings.Contains(clientErr.Body, workspaceKeyMismatchDetail)
+}
+
 // parseLocalConfig parses the --:local-config flag from args.
 // Returns:
 //   - cleanArgs: args with --:local-config and its value removed
@@ -234,6 +247,30 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 		CommandLine: commandLine,
 	})
 	cmdCancel()
+
+	// Cloud: workspace API keys are workspace-bound. Older installs may have an
+	// unbound key, which yields a 403 mismatch. Self-heal by refreshing the key
+	// via /v1/init and retrying once.
+	if err != nil && isWorkspaceKeyMismatch(err) {
+		if refreshErr := refreshWorkspaceKeyAndConfigWithOptions(cfg, true); refreshErr == nil {
+			// Reload config (may be updated by init canonicalization), then retry once.
+			if reloaded, loadErr := config.Load(); loadErr == nil && reloaded != nil {
+				cfg = reloaded
+			}
+			c = newBeadHubClient(cfg.BeadhubURL)
+			cmdCtx, cmdCancel = context.WithTimeout(context.Background(), apiTimeout)
+			cmdResp, err = c.Command(cmdCtx, &client.CommandRequest{
+				WorkspaceID: cfg.WorkspaceID,
+				RepoID:      cfg.RepoID,
+				Alias:       cfg.Alias,
+				HumanName:   cfg.HumanName,
+				RepoOrigin:  cfg.RepoOrigin,
+				Role:        cfg.Role,
+				CommandLine: commandLine,
+			})
+			cmdCancel()
+		}
+	}
 
 	// Track if we need to notify other agents (when --:jump-in overrides rejection)
 	var notifyAgents []client.BeadInProgress
@@ -775,6 +812,15 @@ func syncToBeadHub(cfg *config.Config, bdArgs []string) *SyncResult {
 	resp, err := c.Sync(syncCtx, req)
 	if err != nil {
 		var clientErr *client.Error
+		if isWorkspaceKeyMismatch(err) {
+			if refreshErr := refreshWorkspaceKeyAndConfigWithOptions(cfg, true); refreshErr == nil {
+				if reloaded, loadErr := config.Load(); loadErr == nil && reloaded != nil {
+					cfg = reloaded
+				}
+				c = newBeadHubClient(cfg.BeadhubURL)
+				resp, err = c.Sync(syncCtx, req)
+			}
+		}
 		if errors.As(err, &clientErr) && clientErr.StatusCode == 409 {
 			// Protocol mismatch: retry once with full sync.
 			result.SyncMode = "full"

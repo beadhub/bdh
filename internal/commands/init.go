@@ -19,6 +19,8 @@ import (
 	"github.com/beadhub/bdh/internal/config"
 )
 
+const defaultWorkspaceRole = "implementer"
+
 // CLI flags for init command
 var (
 	initURL        string
@@ -48,7 +50,7 @@ Configuration sources (in priority order):
 3. .env file in current directory
 4. Stored credentials from previous init (~/.config/aw/config.yaml)
 5. Interactive prompts (TTY mode only)
-6. Defaults (role: developer, alias: server-suggested, human: $USER)
+6. Defaults (role: implementer, alias: server-suggested, human: $USER)
 
 API key resolution (for authentication):
 1. --api-key flag
@@ -295,7 +297,7 @@ func promptForRole(availableRoles []string) (string, error) {
 		}
 	}
 
-	defaultRole := "developer"
+	defaultRole := defaultWorkspaceRole
 	for {
 		fmt.Printf("Workspace role [%s]: ", defaultRole)
 		input, err := reader.ReadString('\n')
@@ -498,7 +500,7 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 			return fmt.Errorf("getting role: %w", err)
 		}
 	} else {
-		role = "developer"
+		role = defaultWorkspaceRole
 	}
 
 	// Get alias with priority: CLI flag > env var > prompt (TTY) > default
@@ -796,15 +798,27 @@ func apiKeyFromStoredConfig(beadhubURL string) string {
 }
 
 func refreshWorkspaceKeyAndConfig(cfg *config.Config) error {
+	return refreshWorkspaceKeyAndConfigWithOptions(cfg, false)
+}
+
+func refreshWorkspaceKeyAndConfigWithOptions(cfg *config.Config, quiet bool) error {
 	// Determine target URL: allow override for migrating between envs.
 	beadhubURL := resolveConfig(initURL, "BEADHUB_URL", cfg.BeadhubURL)
 
-	// Resolve API key: --api-key flag > BEADHUB_API_KEY env > stored config.
+	// Resolve API key from the selected worktree account (honors .aw/context),
+	// with explicit overrides for scripting.
 	apiKey := strings.TrimSpace(initAPIKey)
 	if apiKey == "" {
 		apiKey = strings.TrimSpace(os.Getenv("BEADHUB_API_KEY"))
 	}
 	if apiKey == "" {
+		sel, err := resolveBeadhubAuth(beadhubURL)
+		if err == nil {
+			apiKey = strings.TrimSpace(sel.APIKey)
+		}
+	}
+	if apiKey == "" {
+		// Fallback for older configs without worktree context.
 		apiKey = apiKeyFromStoredConfig(beadhubURL)
 	}
 	if apiKey == "" {
@@ -820,7 +834,7 @@ func refreshWorkspaceKeyAndConfig(cfg *config.Config) error {
 		}
 	}
 	if strings.TrimSpace(role) == "" {
-		role = "developer"
+		role = defaultWorkspaceRole
 	}
 
 	repoOrigin := currentRepoOriginBestEffort(cfg)
@@ -897,13 +911,15 @@ func refreshWorkspaceKeyAndConfig(cfg *config.Config) error {
 		return fmt.Errorf("failed to persist account/context: %w", err)
 	}
 
-	fmt.Println()
-	fmt.Println("Refreshed BeadHub workspace authentication")
-	fmt.Printf("  beadhub_url: %s\n", cfg.BeadhubURL)
-	fmt.Printf("  project_slug: %s\n", cfg.ProjectSlug)
-	fmt.Printf("  alias: %s\n", cfg.Alias)
-	fmt.Printf("  role: %s\n", cfg.Role)
-	fmt.Printf("  account: %s (server: %s)\n", accountName, serverName)
+	if !quiet {
+		fmt.Println()
+		fmt.Println("Refreshed BeadHub workspace authentication")
+		fmt.Printf("  beadhub_url: %s\n", cfg.BeadhubURL)
+		fmt.Printf("  project_slug: %s\n", cfg.ProjectSlug)
+		fmt.Printf("  alias: %s\n", cfg.Alias)
+		fmt.Printf("  role: %s\n", cfg.Role)
+		fmt.Printf("  account: %s (server: %s)\n", accountName, serverName)
+	}
 	return nil
 }
 
