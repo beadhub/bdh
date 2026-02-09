@@ -359,8 +359,13 @@ func suggestAliasForRepo(beadhubURL, repoOrigin, role, apiKey string) (string, e
 	return fmt.Sprintf("%s-%s", resp.NamePrefix, config.RoleToAliasPrefix(role)), nil
 }
 
-func suggestAliasForProject(beadhubURL, projectSlug, role string) (string, error) {
-	c := client.New(beadhubURL)
+func suggestAliasForProject(beadhubURL, projectSlug, role, apiKey string) (string, error) {
+	var c *client.Client
+	if strings.TrimSpace(apiKey) != "" {
+		c = client.NewWithAPIKey(beadhubURL, apiKey)
+	} else {
+		c = client.New(beadhubURL)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 
@@ -514,7 +519,7 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 		// Try project-based lookup first if --project is provided
 		projectSlugForSuggestion := resolveConfig(initProject, "BEADHUB_PROJECT", "")
 		if projectSlugForSuggestion != "" {
-			if serverSuggested, err := suggestAliasForProject(beadhubURL, projectSlugForSuggestion, role); err == nil {
+			if serverSuggested, err := suggestAliasForProject(beadhubURL, projectSlugForSuggestion, role, initAPIKey); err == nil {
 				suggestedAlias = serverSuggested
 			} else {
 				var clientErr *client.Error
@@ -522,7 +527,7 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 					return fmt.Errorf("failed to get alias suggestion: %w", err)
 				}
 			}
-		} else if serverSuggested, err := suggestAliasForRepo(beadhubURL, repoOrigin, role, apiKeyFromEnv()); err == nil {
+		} else if serverSuggested, err := suggestAliasForRepo(beadhubURL, repoOrigin, role, initAPIKey); err == nil {
 			suggestedAlias = serverSuggested
 		} else {
 			var clientErr *client.Error

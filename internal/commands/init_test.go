@@ -188,6 +188,127 @@ func TestInitCommand_CreatesBeadhubFile(t *testing.T) {
 	}
 }
 
+func TestInitCommand_ProjectAliasSuggestionUsesAPIKey(t *testing.T) {
+	_ = setupTempWorkspace(t)
+
+	var gotSuggestAuth string
+	var gotInitAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agents/suggest-alias-prefix":
+			gotSuggestAuth = r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"project_slug": "beadhub",
+				"project_id":   nil,
+				"name_prefix":  "charlie",
+			})
+		case "/v1/init":
+			gotInitAuth = r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":           "ok",
+				"api_key":          "bh_sk_123456789012345678901234567890123456",
+				"project_id":       "proj-1",
+				"project_slug":     "beadhub",
+				"repo_id":          "c3d4e5f6-7890-12cd-ef01-345678901234",
+				"canonical_origin": "github.com/test/repo",
+				"workspace_id":     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+				"alias":            "charlie-developer",
+				"created":          true,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_PROJECT", "beadhub")
+	t.Setenv("BEADHUB_ROLE", "developer")
+	t.Setenv("BEADHUB_API_KEY", "bh_sk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+	if err := runInit(); err != nil {
+		t.Fatalf("runInit() error: %v", err)
+	}
+	if gotSuggestAuth != "Bearer bh_sk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("suggest auth=%q want %q", gotSuggestAuth, "Bearer bh_sk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	}
+	if gotInitAuth != "Bearer bh_sk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("init auth=%q want %q", gotInitAuth, "Bearer bh_sk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	}
+}
+
+func TestInitCommand_RepoAliasSuggestionUsesStoredAPIKey(t *testing.T) {
+	_ = setupTempWorkspace(t)
+
+	var gotSuggestAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/workspaces/suggest-name-prefix":
+			gotSuggestAuth = r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"name_prefix":      "dora",
+				"project_id":       "proj-1",
+				"project_slug":     "beadhub",
+				"repo_id":          "c3d4e5f6-7890-12cd-ef01-345678901234",
+				"canonical_origin": "github.com/test/repo",
+			})
+		case "/v1/init":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":           "ok",
+				"api_key":          "bh_sk_123456789012345678901234567890123456",
+				"project_id":       "proj-1",
+				"project_slug":     "beadhub",
+				"repo_id":          "c3d4e5f6-7890-12cd-ef01-345678901234",
+				"canonical_origin": "github.com/test/repo",
+				"workspace_id":     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+				"alias":            "dora-developer",
+				"created":          true,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	// Seed a default account in the aw global config so :init can resolve an API key
+	// even when BEADHUB_API_KEY isn't set.
+	serverName, err := awconfig.DeriveServerNameFromURL(server.URL)
+	if err != nil {
+		t.Fatalf("derive server name: %v", err)
+	}
+	if err := awconfig.UpdateGlobalAt(os.Getenv("AW_CONFIG_PATH"), func(gc *awconfig.GlobalConfig) error {
+		if gc.Servers == nil {
+			gc.Servers = map[string]awconfig.Server{}
+		}
+		if gc.Accounts == nil {
+			gc.Accounts = map[string]awconfig.Account{}
+		}
+		gc.Servers[serverName] = awconfig.Server{URL: server.URL}
+		gc.Accounts["default-acct"] = awconfig.Account{
+			Server: serverName,
+			APIKey: "aw_sk_from_account_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}
+		gc.DefaultAccount = "default-acct"
+		return nil
+	}); err != nil {
+		t.Fatalf("seed aw global config: %v", err)
+	}
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ROLE", "developer")
+
+	if err := runInit(); err != nil {
+		t.Fatalf("runInit() error: %v", err)
+	}
+	if gotSuggestAuth != "Bearer aw_sk_from_account_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("suggest auth=%q want %q", gotSuggestAuth, "Bearer aw_sk_from_account_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	}
+}
+
 func TestInitCommand_AcceptsBhSkAPIKey(t *testing.T) {
 	_ = setupTempWorkspace(t)
 
