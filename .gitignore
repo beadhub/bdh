@@ -12,11 +12,13 @@ coverage.out
 .beadhub-cache/
 .beads/
 .aw/
+.aw-local/
 .cache/
 
 # Environment
 .env
 .env.*
+.beadhub-local
 
 # IDE
 .idea/

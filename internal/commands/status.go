@@ -190,11 +190,12 @@ func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
 			if strings.TrimSpace(ws.WorkspacePath) != "" {
 				result.Path = ws.WorkspacePath
 			}
-			if strings.TrimSpace(ws.FocusApexRepoName) != "" {
-				result.RepoName = ws.FocusApexRepoName
+			// Prefer the workspace repo/branch (what repo they are "in") over focus-apex fields.
+			if strings.TrimSpace(ws.Repo) != "" {
+				result.RepoName = ws.Repo
 			}
-			if strings.TrimSpace(ws.FocusApexBranch) != "" {
-				result.Branch = ws.FocusApexBranch
+			if strings.TrimSpace(ws.Branch) != "" {
+				result.Branch = ws.Branch
 			}
 			continue // Don't add self to team list - shown in "You" section
 		}
@@ -206,8 +207,8 @@ func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
 			LastSeen:  ws.LastSeen,
 			Hostname:  ws.Hostname,
 			Path:      ws.WorkspacePath,
-			RepoName:  ws.FocusApexRepoName,
-			Branch:    ws.FocusApexBranch,
+			RepoName:  ws.Repo,
+			Branch:    ws.Branch,
 			ApexID:    ws.ApexID,
 			ApexTitle: ws.ApexTitle,
 			ApexType:  ws.ApexType,

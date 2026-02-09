@@ -593,6 +593,36 @@ func TestGet_ResponseSizeLimiting(t *testing.T) {
 	}
 }
 
+func TestWorkspaces_ParsesRepoAndBranch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/workspaces" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		resp := `{"workspaces":[{"workspace_id":"ws-1","alias":"alice","human_name":"Alice","project_slug":"beadhub","repo":"github.com/beadhub/beadhub-all","branch":"feature-x","status":"active","last_seen":"2026-02-09T00:00:00Z"}],"count":1}`
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(resp))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.Workspaces(context.Background(), &WorkspacesRequest{})
+	if err != nil {
+		t.Fatalf("Workspaces() error: %v", err)
+	}
+	if len(got.Workspaces) != 1 {
+		t.Fatalf("expected 1 workspace, got %d", len(got.Workspaces))
+	}
+	if got.Workspaces[0].Repo != "github.com/beadhub/beadhub-all" {
+		t.Fatalf("expected repo parsed, got %q", got.Workspaces[0].Repo)
+	}
+	if got.Workspaces[0].Branch != "feature-x" {
+		t.Fatalf("expected branch parsed, got %q", got.Workspaces[0].Branch)
+	}
+}
+
 func TestNewWithAPIKey_SendsAuthorizationHeader(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify Authorization header is sent

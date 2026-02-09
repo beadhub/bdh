@@ -553,6 +553,8 @@ type Workspace struct {
 	Role              string  `json:"role,omitempty"`
 	Hostname          string  `json:"hostname,omitempty"`
 	WorkspacePath     string  `json:"workspace_path,omitempty"`
+	Repo              string  `json:"repo,omitempty"`
+	Branch            string  `json:"branch,omitempty"`
 	ApexID            string  `json:"apex_id,omitempty"`
 	ApexTitle         string  `json:"apex_title,omitempty"`
 	ApexType          string  `json:"apex_type,omitempty"`
