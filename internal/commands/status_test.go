@@ -126,6 +126,8 @@ func TestFormatStatusOutput_TeamMember(t *testing.T) {
 
 	result := &StatusResult{
 		Alias: "test-agent",
+		Hostname: "Mac.c.is",
+		Path: "/Users/test/prj/root",
 		Team: []TeamMemberInfo{
 			{
 				Alias:     "alice-coordinator",
@@ -155,8 +157,11 @@ func TestFormatStatusOutput_TeamMember(t *testing.T) {
 	if !strings.Contains(output, "active") {
 		t.Error("output should contain team member status")
 	}
-	if !strings.Contains(output, "Workspace: Mac.c.is /Users/alice/prj/repo") {
-		t.Error("output should contain workspace location")
+	if !strings.Contains(output, "Hostname: Mac.c.is") {
+		t.Error("output should contain hostname")
+	}
+	if !strings.Contains(output, "Path: ") {
+		t.Error("output should contain path line")
 	}
 	if !strings.Contains(output, "github.com/test/repo") {
 		t.Error("output should contain repo name")
@@ -187,8 +192,11 @@ func TestFormatStatusOutput_TeamMemberWithBranch(t *testing.T) {
 
 	output := formatStatusOutput(result, false)
 
-	if !strings.Contains(output, "github.com/test/repo (feature-branch)") {
-		t.Error("output should show repo with branch when not main/master")
+	if !strings.Contains(output, "Repo: github.com/test/repo") {
+		t.Error("output should show repo line")
+	}
+	if !strings.Contains(output, "Branch: feature-branch") {
+		t.Error("output should show branch line when not main/master")
 	}
 }
 
@@ -213,8 +221,11 @@ func TestFormatStatusOutput_TeamMemberMainBranchHidden(t *testing.T) {
 	if strings.Contains(output, "(main)") {
 		t.Error("output should NOT show branch when it's main")
 	}
-	if !strings.Contains(output, "Repo: github.com/test/repo\n") {
+	if !strings.Contains(output, "Repo: github.com/test/repo") {
 		t.Error("output should show repo without branch")
+	}
+	if strings.Contains(output, "Branch: main") {
+		t.Error("output should NOT show branch line when it's main")
 	}
 }
 

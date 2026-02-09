@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -73,6 +74,10 @@ type TeamMemberInfo struct {
 type StatusResult struct {
 	Alias              string
 	Role               string
+	Hostname           string
+	Path               string
+	RepoName           string
+	Branch             string
 	YourClaims         []ClaimInfo
 	YourLocks          []LockSummary
 	Team               []TeamMemberInfo
@@ -117,6 +122,11 @@ func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
 	result := &StatusResult{
 		Alias: cfg.Alias,
 		Role:  cfg.Role,
+	}
+	result.RepoName = cfg.CanonicalOrigin
+	result.Hostname, _ = os.Hostname()
+	if root, err := config.WorkspaceRoot(); err == nil {
+		result.Path = root
 	}
 
 	// Fetch all project workspaces with claims
@@ -173,6 +183,19 @@ func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
 		if isYou {
 			result.YourClaims = claims
 			result.YourLocks = locks
+			// Prefer server-tracked workspace location for self if available.
+			if strings.TrimSpace(ws.Hostname) != "" {
+				result.Hostname = ws.Hostname
+			}
+			if strings.TrimSpace(ws.WorkspacePath) != "" {
+				result.Path = ws.WorkspacePath
+			}
+			if strings.TrimSpace(ws.FocusApexRepoName) != "" {
+				result.RepoName = ws.FocusApexRepoName
+			}
+			if strings.TrimSpace(ws.FocusApexBranch) != "" {
+				result.Branch = ws.FocusApexBranch
+			}
 			continue // Don't add self to team list - shown in "You" section
 		}
 
@@ -216,6 +239,18 @@ func formatStatusOutput(result *StatusResult, asJSON bool) string {
 	if result.Role != "" {
 		sb.WriteString(fmt.Sprintf("- Role: %s\n", result.Role))
 	}
+	if h := strings.TrimSpace(result.Hostname); h != "" {
+		sb.WriteString(fmt.Sprintf("- Hostname: %s\n", h))
+	}
+	if p := strings.TrimSpace(result.Path); p != "" {
+		sb.WriteString(fmt.Sprintf("- Path: %s\n", abbreviateUserHome(p)))
+	}
+	if repo := strings.TrimSpace(result.RepoName); repo != "" {
+		sb.WriteString(fmt.Sprintf("- Repo: %s\n", repo))
+		if b := strings.TrimSpace(result.Branch); b != "" && b != "main" && b != "master" {
+			sb.WriteString(fmt.Sprintf("- Branch: %s\n", b))
+		}
+	}
 
 	// Your claims
 	if len(result.YourClaims) > 0 {
@@ -258,28 +293,24 @@ func formatStatusOutput(result *StatusResult, asJSON bool) string {
 			}
 			sb.WriteString(fmt.Sprintf(" — %s — %s\n", member.Status, timeAgo))
 
-			// Workspace location (hostname + path) when available.
+			// Workspace location.
 			host := strings.TrimSpace(member.Hostname)
+			if host != "" {
+				sb.WriteString(fmt.Sprintf("  Hostname: %s\n", host))
+			}
 			path := strings.TrimSpace(member.Path)
-			if host != "" || path != "" {
-				if host != "" && path != "" {
-					sb.WriteString(fmt.Sprintf("  Workspace: %s %s\n", host, path))
-				} else if host != "" {
-					sb.WriteString(fmt.Sprintf("  Workspace: %s\n", host))
-				} else {
-					sb.WriteString(fmt.Sprintf("  Workspace: %s\n", path))
-				}
+			if path != "" {
+				sb.WriteString(fmt.Sprintf("  Path: %s\n", formatWorkspacePath(path, host, result.Hostname, result.Path)))
 			}
 
-			// Repo/branch if available
+			// Repo/branch.
 			repoName := strings.TrimSpace(member.RepoName)
 			branch := strings.TrimSpace(member.Branch)
 			if repoName != "" {
-				if branch != "" && branch != "main" && branch != "master" {
-					sb.WriteString(fmt.Sprintf("  Repo: %s (%s)\n", repoName, branch))
-				} else {
-					sb.WriteString(fmt.Sprintf("  Repo: %s\n", repoName))
-				}
+				sb.WriteString(fmt.Sprintf("  Repo: %s\n", repoName))
+			}
+			if branch != "" && branch != "main" && branch != "master" {
+				sb.WriteString(fmt.Sprintf("  Branch: %s\n", branch))
 			}
 
 			// Working on / Epic
@@ -335,4 +366,52 @@ func formatStatusOutput(result *StatusResult, asJSON bool) string {
 	}
 
 	return sb.String()
+}
+
+func abbreviateUserHome(path string) string {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return ""
+	}
+	p = filepath.Clean(p)
+
+	if strings.HasPrefix(p, "/Users/") {
+		rest := strings.TrimPrefix(p, "/Users/")
+		parts := strings.SplitN(rest, string(filepath.Separator), 2)
+		if len(parts) == 1 {
+			return "~"
+		}
+		return "~" + string(filepath.Separator) + parts[1]
+	}
+	if strings.HasPrefix(p, "/home/") {
+		rest := strings.TrimPrefix(p, "/home/")
+		parts := strings.SplitN(rest, string(filepath.Separator), 2)
+		if len(parts) == 1 {
+			return "~"
+		}
+		return "~" + string(filepath.Separator) + parts[1]
+	}
+	return p
+}
+
+func formatWorkspacePath(path, memberHost, yourHost, yourPath string) string {
+	raw := strings.TrimSpace(path)
+	if raw == "" {
+		return ""
+	}
+
+	// Prefer relative paths when on the same host and both sides have absolute paths.
+	if strings.TrimSpace(memberHost) != "" && strings.TrimSpace(yourHost) != "" && memberHost == yourHost {
+		base := strings.TrimSpace(yourPath)
+		if base != "" {
+			if rel, err := filepath.Rel(base, raw); err == nil {
+				// Only use rel when it's meaningfully shorter.
+				if rel != "." && len(rel) < len(raw) {
+					return rel
+				}
+			}
+		}
+	}
+
+	return abbreviateUserHome(raw)
 }
