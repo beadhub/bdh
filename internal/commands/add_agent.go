@@ -28,10 +28,9 @@ var addWorktreeCmd = &cobra.Command{
 	Long: `Create an agent worktree and initialize bdh for multi-agent development.
 
 This command:
-1. Queries BeadHub for the next available name prefix (e.g., "alice", "bob")
-2. Computes the alias <name-prefix>-<role> (unless overridden)
-3. Creates a git worktree at ../<repo-name>-<alias>/ on a branch named <alias>
-4. Runs bdh :init in the new worktree with the computed alias
+1. Queries BeadHub for the next available name (e.g., "alice", "bob")
+2. Creates a git worktree at ../<repo-name>-<name>/ on a branch named <name>
+3. Runs bdh :init in the new worktree with the name as alias and the given role
 
 The role should be 1-2 words (e.g., "coord", "backend", "full-stack"). If omitted,
 bdh will prompt in TTY mode with available roles from the project policy, or error
@@ -39,14 +38,14 @@ in non-interactive mode listing the available roles.
 
 Examples:
   bdh :add-worktree                       # Prompts for role from project policy
-  bdh :add-worktree coord                 # Creates worktree with alias like alice-coord
-  bdh :add-worktree backend --alias bob-backend  # Override default alias`,
+  bdh :add-worktree coord                 # Creates worktree with alias like "alice"
+  bdh :add-worktree backend --alias bob   # Override default alias`,
 	Args: cobra.RangeArgs(0, 1),
 	RunE: runAddWorktree,
 }
 
 func init() {
-	addWorktreeCmd.Flags().StringVar(&addWorktreeAlias, "alias", "", "Override the default alias (default: <name-prefix>-<role>)")
+	addWorktreeCmd.Flags().StringVar(&addWorktreeAlias, "alias", "", "Override the default alias")
 }
 
 // validateNamePrefix checks that the name prefix matches the expected format:
@@ -243,7 +242,7 @@ func runAddWorktree(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("invalid name prefix from server: %q\nExpected format: lowercase letters with optional -NN suffix (e.g., 'alice' or 'alice-01')", namePrefix)
 			}
 
-			alias = fmt.Sprintf("%s-%s", namePrefix, config.RoleToAliasPrefix(normalizedRole))
+			alias = namePrefix
 		}
 
 		branchName := alias

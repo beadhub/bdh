@@ -149,7 +149,7 @@ func TestAddAgent_Integration(t *testing.T) {
 			_ = json.NewDecoder(r.Body).Decode(&initReq)
 			alias := initReq.Alias
 			if strings.TrimSpace(alias) == "" {
-				alias = "testname-coord"
+				alias = "testname"
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status":           "ok",
@@ -236,8 +236,8 @@ func TestAddAgent_Integration(t *testing.T) {
 		t.Fatalf("runAddWorktree() error: %v", err)
 	}
 
-	// Verify worktree was created
-	worktreePath := filepath.Join(tmpDir, "myrepo-testname-coord")
+	// Verify worktree was created (alias = name prefix, no role suffix)
+	worktreePath := filepath.Join(tmpDir, "myrepo-testname")
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		t.Error("worktree directory was not created")
 	}
@@ -253,10 +253,10 @@ func TestAddAgent_Integration(t *testing.T) {
 	}
 
 	// Verify git branch was created
-	branchCmd := exec.Command("git", "-C", mainRepo, "branch", "--list", "testname-coord")
+	branchCmd := exec.Command("git", "-C", mainRepo, "branch", "--list", "testname")
 	output, _ := branchCmd.Output()
 	if len(output) == 0 {
-		t.Error("git branch 'testname-coord' was not created")
+		t.Error("git branch 'testname' was not created")
 	}
 
 	// Cleanup: remove worktree
@@ -465,8 +465,8 @@ func TestAddAgent_DirectoryAlreadyExists(t *testing.T) {
 		t.Fatalf("write beads.db: %v", err)
 	}
 
-	// Create the directory that would conflict with the worktree
-	conflictPath := filepath.Join(tmpDir, "myrepo-alice-coord")
+	// Create the directory that would conflict with the worktree (alias = name prefix)
+	conflictPath := filepath.Join(tmpDir, "myrepo-alice")
 	if err := os.MkdirAll(conflictPath, 0755); err != nil {
 		t.Fatalf("mkdir conflict path: %v", err)
 	}
