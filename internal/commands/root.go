@@ -85,6 +85,7 @@ func init() {
 	rootCmd.AddCommand(addWorktreeCmd)
 	rootCmd.AddCommand(notifyCmd)
 	rootCmd.AddCommand(helpCmd)
+	rootCmd.AddCommand(updateCmd)
 }
 
 func loadDotenvBestEffort() {
@@ -146,6 +147,7 @@ func Execute() error {
 		if versionInfo.date != "" && versionInfo.date != "unknown" {
 			fmt.Printf("  built:  %s\n", versionInfo.date)
 		}
+		checkLatestVersion(os.Stdout, "")
 		fmt.Println()
 		return executePassthrough([]string{"--version"})
 	}
