@@ -58,8 +58,8 @@ API key resolution (for authentication):
 3. Stored key from ~/.config/aw/config.yaml (matching target server)
 4. No auth (falls back to email-based flow)
 
-Default alias format: <name>-<role> (e.g., alice-implementer, bob-reviewer).
-The server suggests a unique name prefix per project; you can override in TTY mode.
+Default alias format: <name> (e.g., alice, bob).
+The server suggests a unique name per project; you can override in TTY mode.
 
 Use --update to update the workspace's hostname and workspace_path on the server.
 This is useful when moving a workspace to a different machine or directory.`,
@@ -353,10 +353,7 @@ func suggestAliasForRepo(beadhubURL, repoOrigin, role, apiKey string) (string, e
 	if strings.TrimSpace(resp.NamePrefix) == "" {
 		return "", fmt.Errorf("server returned empty name_prefix")
 	}
-	if strings.TrimSpace(role) == "" {
-		return resp.NamePrefix, nil
-	}
-	return fmt.Sprintf("%s-%s", resp.NamePrefix, config.RoleToAliasPrefix(role)), nil
+	return resp.NamePrefix, nil
 }
 
 func suggestAliasForProject(beadhubURL, projectSlug, role, apiKey string) (string, error) {
@@ -376,10 +373,7 @@ func suggestAliasForProject(beadhubURL, projectSlug, role, apiKey string) (strin
 	if strings.TrimSpace(resp.NamePrefix) == "" {
 		return "", fmt.Errorf("server returned empty name_prefix")
 	}
-	if strings.TrimSpace(role) == "" {
-		return resp.NamePrefix, nil
-	}
-	return fmt.Sprintf("%s-%s", resp.NamePrefix, config.RoleToAliasPrefix(role)), nil
+	return resp.NamePrefix, nil
 }
 
 // promptForProjectSlug prompts the user interactively for the project slug.
@@ -514,7 +508,7 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 	alias := resolveConfig(initAlias, "BEADHUB_ALIAS", "")
 	aliasIsDefaultSuggestion := false
 	if alias == "" {
-		suggestedAlias := fmt.Sprintf("alice-%s", config.RoleToAliasPrefix(role))
+		suggestedAlias := "alice"
 
 		// Try project-based lookup first if --project is provided
 		projectSlugForSuggestion := resolveConfig(initProject, "BEADHUB_PROJECT", "")

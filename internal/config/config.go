@@ -303,11 +303,6 @@ func IsValidRole(role string) bool {
 	return true
 }
 
-// RoleToAliasPrefix converts a role to a hyphenated alias prefix.
-func RoleToAliasPrefix(role string) string {
-	return strings.ReplaceAll(NormalizeRole(role), " ", "-")
-}
-
 // SanitizeSlug converts a string (typically a directory name) to a valid project slug.
 // It handles common issues like underscores, dots, spaces, and special characters.
 // Returns an empty string if the input cannot be sanitized to a valid slug.
