@@ -147,6 +147,12 @@ func extractBinary(archivePath, binaryName, destDir string) error {
 			return fmt.Errorf("reading tar: %w", err)
 		}
 
+		// Skip entries with path traversal
+		clean := filepath.Clean(hdr.Name)
+		if strings.Contains(clean, "..") || filepath.IsAbs(clean) {
+			continue
+		}
+
 		// Match the binary name (may be at top level or in a subdirectory)
 		if filepath.Base(hdr.Name) == binaryName && hdr.Typeflag == tar.TypeReg {
 			destPath := filepath.Join(destDir, binaryName)
@@ -154,11 +160,11 @@ func extractBinary(archivePath, binaryName, destDir string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
-				return err
-			}
+			_, copyErr := io.Copy(out, tr)
 			out.Close()
+			if copyErr != nil {
+				return copyErr
+			}
 			return nil
 		}
 	}
@@ -174,24 +180,29 @@ func extractBinaryFromZip(archivePath, binaryName, destDir string) error {
 	defer r.Close()
 
 	for _, f := range r.File {
+		// Skip entries with path traversal
+		clean := filepath.Clean(f.Name)
+		if strings.Contains(clean, "..") || filepath.IsAbs(clean) {
+			continue
+		}
+
 		if filepath.Base(f.Name) == binaryName || filepath.Base(f.Name) == binaryName+".exe" {
 			rc, err := f.Open()
 			if err != nil {
 				return err
 			}
+			defer rc.Close()
+
 			destPath := filepath.Join(destDir, filepath.Base(f.Name))
 			out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY, f.Mode())
 			if err != nil {
-				rc.Close()
 				return err
 			}
-			if _, err := io.Copy(out, rc); err != nil {
-				out.Close()
-				rc.Close()
-				return err
-			}
+			_, copyErr := io.Copy(out, rc)
 			out.Close()
-			rc.Close()
+			if copyErr != nil {
+				return copyErr
+			}
 			return nil
 		}
 	}
@@ -369,8 +380,13 @@ func selfUpdate(w io.Writer, apiBase string) error {
 }
 
 // downloadFile downloads a URL to a local file.
-func downloadFile(destPath, url string) error {
-	resp, err := http.Get(url)
+func downloadFile(destPath, rawURL string) error {
+	if !strings.HasPrefix(rawURL, "https://") {
+		return fmt.Errorf("refusing non-HTTPS download URL: %s", rawURL)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Get(rawURL)
 	if err != nil {
 		return err
 	}
