@@ -58,6 +58,8 @@ type TeamMemberInfo struct {
 	Role      string        `json:"role,omitempty"`
 	Status    string        `json:"status"`
 	LastSeen  string        `json:"last_seen"`
+	Hostname  string        `json:"hostname,omitempty"`
+	Path      string        `json:"workspace_path,omitempty"`
 	RepoName  string        `json:"repo_name,omitempty"`
 	Branch    string        `json:"branch,omitempty"`
 	ApexID    string        `json:"apex_id,omitempty"`
@@ -179,6 +181,8 @@ func fetchStatusWithConfig(cfg *config.Config) (*StatusResult, error) {
 			Role:      ws.Role,
 			Status:    ws.Status,
 			LastSeen:  ws.LastSeen,
+			Hostname:  ws.Hostname,
+			Path:      ws.WorkspacePath,
 			RepoName:  ws.FocusApexRepoName,
 			Branch:    ws.FocusApexBranch,
 			ApexID:    ws.ApexID,
@@ -253,6 +257,19 @@ func formatStatusOutput(result *StatusResult, asJSON bool) string {
 				sb.WriteString(fmt.Sprintf(" — %s", member.Role))
 			}
 			sb.WriteString(fmt.Sprintf(" — %s — %s\n", member.Status, timeAgo))
+
+			// Workspace location (hostname + path) when available.
+			host := strings.TrimSpace(member.Hostname)
+			path := strings.TrimSpace(member.Path)
+			if host != "" || path != "" {
+				if host != "" && path != "" {
+					sb.WriteString(fmt.Sprintf("  Workspace: %s %s\n", host, path))
+				} else if host != "" {
+					sb.WriteString(fmt.Sprintf("  Workspace: %s\n", host))
+				} else {
+					sb.WriteString(fmt.Sprintf("  Workspace: %s\n", path))
+				}
+			}
 
 			// Repo/branch if available
 			repoName := strings.TrimSpace(member.RepoName)

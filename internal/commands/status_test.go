@@ -128,12 +128,14 @@ func TestFormatStatusOutput_TeamMember(t *testing.T) {
 		Alias: "test-agent",
 		Team: []TeamMemberInfo{
 			{
-				Alias:    "alice-coordinator",
-				Role:     "coordinator",
-				Status:   "active",
-				LastSeen: lastSeen,
-				RepoName: "github.com/test/repo",
-				ApexID:   "task-456",
+				Alias:     "alice-coordinator",
+				Role:      "coordinator",
+				Status:    "active",
+				LastSeen:  lastSeen,
+				Hostname:  "Mac.c.is",
+				Path:      "/Users/alice/prj/repo",
+				RepoName:  "github.com/test/repo",
+				ApexID:    "task-456",
 				ApexTitle: "Implement feature",
 				Claims: []ClaimInfo{
 					{BeadID: "task-456", Title: "Implement feature", ClaimedAt: claimedAt},
@@ -152,6 +154,9 @@ func TestFormatStatusOutput_TeamMember(t *testing.T) {
 	}
 	if !strings.Contains(output, "active") {
 		t.Error("output should contain team member status")
+	}
+	if !strings.Contains(output, "Workspace: Mac.c.is /Users/alice/prj/repo") {
+		t.Error("output should contain workspace location")
 	}
 	if !strings.Contains(output, "github.com/test/repo") {
 		t.Error("output should contain repo name")
