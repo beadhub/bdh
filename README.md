@@ -45,7 +45,6 @@ bdh close bd-42
 bdh :status              # Your identity + team status
 bdh :policy              # Project policy and playbook
 bdh ready                # Find available work
-bdh :aweb who            # Who's online?
 bdh :aweb locks          # See active file reservations
 ```
 
@@ -57,7 +56,7 @@ bdh :aweb mail send alice "Login bug fixed."
 bdh :aweb mail list
 
 # Chat (sync) — when you need an answer to proceed
-bdh :aweb chat send-and-wait alice "Quick question..." --wait 300
+bdh :aweb chat send-and-wait alice "Quick question..." --start-conversation
 bdh :aweb chat pending
 ```
 

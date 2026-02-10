@@ -20,7 +20,6 @@ var awebCmd = &cobra.Command{
 BeadHub implements the aweb protocol and serves the aweb routes in the same server.
 
 Examples:
-  bdh :aweb who
   bdh :aweb whoami
   bdh :aweb mail send alice "hello"
   bdh :aweb locks

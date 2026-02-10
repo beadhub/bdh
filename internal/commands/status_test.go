@@ -10,7 +10,7 @@ import (
 func TestFormatStatusOutput_BasicIdentity(t *testing.T) {
 	result := &StatusResult{
 		Alias: "test-agent",
-		Role:  "implementer",
+		Role:  "developer",
 	}
 
 	output := formatStatusOutput(result, false)
@@ -21,7 +21,7 @@ func TestFormatStatusOutput_BasicIdentity(t *testing.T) {
 	if !strings.Contains(output, "Alias: test-agent") {
 		t.Error("output should contain alias")
 	}
-	if !strings.Contains(output, "Role: implementer") {
+	if !strings.Contains(output, "Role: developer") {
 		t.Error("output should contain role")
 	}
 }
@@ -43,7 +43,7 @@ func TestFormatStatusOutput_YourClaims(t *testing.T) {
 	claimedAt := time.Now().Add(-30 * time.Minute).Format(time.RFC3339)
 	result := &StatusResult{
 		Alias: "test-agent",
-		Role:  "implementer",
+		Role:  "developer",
 		YourClaims: []ClaimInfo{
 			{BeadID: "test-123", Title: "Fix the bug", ClaimedAt: claimedAt},
 		},
@@ -350,7 +350,7 @@ func TestFormatStatusOutput_JSON(t *testing.T) {
 
 	result := &StatusResult{
 		Alias: "test-agent",
-		Role:  "implementer",
+		Role:  "developer",
 		YourClaims: []ClaimInfo{
 			{BeadID: "test-123", Title: "Test claim", ClaimedAt: claimedAt},
 		},
@@ -372,7 +372,7 @@ func TestFormatStatusOutput_JSON(t *testing.T) {
 	if parsed["Alias"] != "test-agent" {
 		t.Error("JSON should contain Alias")
 	}
-	if parsed["Role"] != "implementer" {
+	if parsed["Role"] != "developer" {
 		t.Error("JSON should contain Role")
 	}
 

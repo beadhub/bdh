@@ -1059,7 +1059,7 @@ func formatPassthroughOutput(result *PassthroughResult) string {
 				}
 			}
 			if result.TeamStatusMore {
-				sb.WriteString("  → More agents: `bdh :aweb who`\n")
+				sb.WriteString("  → More agents: `bdh :status`\n")
 			}
 		}
 

@@ -281,7 +281,7 @@ func TestAddAgent_NoRole_NonTTY_ErrorsWithAvailableRoles(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"policy_id": "pol-123",
 				"roles": map[string]any{
-					"implementer": map[string]any{"title": "Implementer"},
+					"developer": map[string]any{"title": "Developer"},
 					"coordinator": map[string]any{"title": "Coordinator"},
 				},
 			})
@@ -324,7 +324,7 @@ func TestAddAgent_NoRole_NonTTY_ErrorsWithAvailableRoles(t *testing.T) {
 	if !strings.Contains(errMsg, "no role specified") {
 		t.Errorf("error should mention 'no role specified', got: %v", err)
 	}
-	if !strings.Contains(errMsg, "coordinator") || !strings.Contains(errMsg, "implementer") {
+	if !strings.Contains(errMsg, "coordinator") || !strings.Contains(errMsg, "developer") {
 		t.Errorf("error should list available roles, got: %v", err)
 	}
 }

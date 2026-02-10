@@ -19,7 +19,7 @@ import (
 	"github.com/beadhub/bdh/internal/config"
 )
 
-const defaultWorkspaceRole = "implementer"
+const defaultWorkspaceRole = "developer"
 
 // CLI flags for init command
 var (
@@ -50,7 +50,7 @@ Configuration sources (in priority order):
 3. .env file in current directory
 4. Stored credentials from previous init (~/.config/aw/config.yaml)
 5. Interactive prompts (TTY mode only)
-6. Defaults (role: implementer, alias: server-suggested, human: $USER)
+6. Defaults (role: developer, alias: server-suggested, human: $USER)
 
 API key resolution (for authentication):
 1. --api-key flag
