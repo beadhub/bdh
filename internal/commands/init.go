@@ -644,6 +644,10 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 				} else {
 					return fmt.Errorf("alias '%s' is already taken. Use --alias to specify a different one", alias)
 				}
+			} else if strings.Contains(clientErr.Body, "pending_validation") {
+				// Backward compat: older servers return pending_validation as an error
+				fmt.Println("\nEmail validation pending — check your inbox, then run 'bdh :init' again.")
+				return nil
 			} else {
 				return fmt.Errorf("failed to initialize workspace: %w", err)
 			}
@@ -652,13 +656,18 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 		}
 	}
 
-	if initResp != nil && initResp.Status == "pending_validation" {
+	isPending := initResp.Status == "pending_validation"
+	if isPending {
 		fmt.Println("\nEmail validation pending — check your inbox. You can keep working while you wait.")
 	}
 
 	// Validate API key format before saving
 	// Cloud returns bh_sk_* keys; OSS/aweb returns aw_sk_* keys.
 	if !(strings.HasPrefix(initResp.APIKey, "aw_sk_") || strings.HasPrefix(initResp.APIKey, "bh_sk_")) || len(initResp.APIKey) < 38 {
+		if isPending {
+			fmt.Println("Complete email validation, then run 'bdh :init' again.")
+			return nil
+		}
 		return fmt.Errorf("server returned malformed API key")
 	}
 
