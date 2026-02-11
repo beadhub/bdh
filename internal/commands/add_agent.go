@@ -351,6 +351,7 @@ func resetAddWorktreeInitFlags() {
 	initHuman = ""
 	initProject = ""
 	initRole = ""
+	initEmail = ""
 	initUpdate = false
 	initInjectDocs = false
 }

@@ -28,6 +28,7 @@ var (
 	initHuman      string
 	initProject    string
 	initRole       string
+	initEmail      string
 	initUpdate     bool
 	initInjectDocs bool
 	initSetupHooks bool
@@ -79,6 +80,7 @@ func init() {
 	initCmd.Flags().BoolVar(&initSetupHooks, "setup-hooks", false, "Set up Claude Code hooks for chat notifications")
 	initCmd.Flags().BoolVar(&initRefreshKey, "refresh-key", false, "Refresh the workspace API key (Cloud; fixes coordination 403s)")
 	initCmd.Flags().StringVar(&initAPIKey, "api-key", "", "API key for non-interactive auth (skips email prompt)")
+	initCmd.Flags().StringVar(&initEmail, "email", "", "Email for Cloud validation")
 }
 
 // isTTY returns true if stdin is a terminal.
@@ -476,7 +478,7 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 	humanName := resolveConfig(initHuman, "BEADHUB_HUMAN", getDefaultHumanName())
 	email := ""
 	if initAPIKey == "" {
-		email = os.Getenv("BEADHUB_EMAIL") // For Cloud (ignored by OSS)
+		email = resolveConfig(initEmail, "BEADHUB_EMAIL", "")
 	}
 
 	// Get role with priority: CLI flag > env var > prompt (TTY) > default
@@ -493,8 +495,13 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 			return fmt.Errorf("invalid role: use 1-2 words (letters/numbers) with hyphens/underscores allowed; max 50 chars")
 		}
 	} else if isTTY() {
+		// Fetch available roles from project policy (best-effort)
+		availableRoles, rolesErr := fetchAvailablePolicyRoles(beadhubURL)
+		if rolesErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not fetch policy roles: %v\n", rolesErr)
+		}
 		var err error
-		role, err = promptForRole(nil)
+		role, err = promptForRole(availableRoles)
 		if err != nil {
 			return fmt.Errorf("getting role: %w", err)
 		}
@@ -637,17 +644,16 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 				} else {
 					return fmt.Errorf("alias '%s' is already taken. Use --alias to specify a different one", alias)
 				}
-			} else if strings.Contains(clientErr.Body, "pending_validation") {
-				// Cloud: email validation pending
-				fmt.Println("\nEmail validation required.")
-				fmt.Println("Check your email and click the validation link, then run 'bdh :init' again.")
-				return nil
 			} else {
 				return fmt.Errorf("failed to initialize workspace: %w", err)
 			}
 		} else {
 			return fmt.Errorf("could not reach BeadHub at %s: %w", beadhubURL, err)
 		}
+	}
+
+	if initResp != nil && initResp.Status == "pending_validation" {
+		fmt.Println("\nEmail validation pending — check your inbox. You can keep working while you wait.")
 	}
 
 	// Validate API key format before saving
