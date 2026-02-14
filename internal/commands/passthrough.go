@@ -542,7 +542,8 @@ func loadIssues() ([]Issue, error) {
 }
 
 // findRelatedBeadIDs finds bead IDs that are related to the given bead ID.
-// Related means: dependency relationship (blocks/blocked-by), same parent epic.
+// Related means: dependency relationship, same parent epic, shared labels, or similar title.
+// More specific relations (dependency) take precedence over weaker ones (labels, title).
 func findRelatedBeadIDs(closedBeadID string, issues []Issue) map[string]string {
 	related := make(map[string]string) // beadID -> relation description
 
@@ -567,6 +568,14 @@ func findRelatedBeadIDs(closedBeadID string, issues []Issue) map[string]string {
 		}
 	}
 
+	// Build label set for the closed issue
+	closedLabels := make(map[string]bool, len(closedIssue.Labels))
+	for _, l := range closedIssue.Labels {
+		closedLabels[l] = true
+	}
+
+	closedTitleLower := strings.ToLower(strings.TrimSpace(closedIssue.Title))
+
 	// Check all issues for relationships
 	for _, issue := range issues {
 		if issue.ID == closedBeadID {
@@ -587,6 +596,33 @@ func findRelatedBeadIDs(closedBeadID string, issues []Issue) map[string]string {
 					if _, exists := related[issue.ID]; !exists {
 						related[issue.ID] = "same parent epic"
 					}
+				}
+			}
+		}
+
+		// Check for shared labels
+		if _, exists := related[issue.ID]; !exists {
+			for _, l := range issue.Labels {
+				if closedLabels[l] {
+					related[issue.ID] = fmt.Sprintf("shared label: %s", l)
+					break
+				}
+			}
+		}
+
+		// Check for similar titles (fuzzy match via Levenshtein distance)
+		if _, exists := related[issue.ID]; !exists {
+			issueTitleLower := strings.ToLower(strings.TrimSpace(issue.Title))
+			// Only match titles with at least 15 characters to avoid noisy matches
+			if len(closedTitleLower) >= 15 && len(issueTitleLower) >= 15 {
+				dist := levenshteinDistance(closedTitleLower, issueTitleLower)
+				maxLen := len(closedTitleLower)
+				if len(issueTitleLower) > maxLen {
+					maxLen = len(issueTitleLower)
+				}
+				// Require at most 30% edit distance
+				if dist*100/maxLen <= 30 {
+					related[issue.ID] = "similar title"
 				}
 			}
 		}

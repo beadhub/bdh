@@ -2047,3 +2047,102 @@ func TestIsWorkspaceRecentlyActive(t *testing.T) {
 		})
 	}
 }
+
+func TestFindRelatedBeadIDs_SharedLabels(t *testing.T) {
+	issues := []Issue{
+		{ID: "bd-1", Title: "Fix auth bug", Labels: []string{"auth", "bug"}},
+		{ID: "bd-2", Title: "Add auth tests", Labels: []string{"auth", "testing"}},
+		{ID: "bd-3", Title: "Update docs", Labels: []string{"docs"}},
+		{ID: "bd-4", Title: "Fix login", Labels: []string{"auth"}},
+	}
+
+	related := findRelatedBeadIDs("bd-1", issues)
+
+	// bd-2 and bd-4 share "auth" label with bd-1
+	if _, ok := related["bd-2"]; !ok {
+		t.Error("expected bd-2 to be related (shared 'auth' label)")
+	}
+	if _, ok := related["bd-4"]; !ok {
+		t.Error("expected bd-4 to be related (shared 'auth' label)")
+	}
+	// bd-3 has no shared labels
+	if _, ok := related["bd-3"]; ok {
+		t.Error("expected bd-3 NOT to be related (no shared labels)")
+	}
+	// Verify relation descriptions mention the label
+	if !strings.Contains(related["bd-2"], "label") {
+		t.Errorf("expected label mention in relation, got: %q", related["bd-2"])
+	}
+}
+
+func TestFindRelatedBeadIDs_FuzzyTitleMatch(t *testing.T) {
+	issues := []Issue{
+		{ID: "bd-1", Title: "Fix authentication bug in login flow"},
+		{ID: "bd-2", Title: "Fix authentication bug in signup flow"},
+		{ID: "bd-3", Title: "Completely unrelated dashboard work"},
+	}
+
+	related := findRelatedBeadIDs("bd-1", issues)
+
+	// bd-2 has a very similar title
+	if _, ok := related["bd-2"]; !ok {
+		t.Error("expected bd-2 to be related (similar title)")
+	}
+	// bd-3 has a very different title
+	if _, ok := related["bd-3"]; ok {
+		t.Error("expected bd-3 NOT to be related (different title)")
+	}
+	if rel, ok := related["bd-2"]; ok && !strings.Contains(rel, "similar title") {
+		t.Errorf("expected 'similar title' in relation, got: %q", rel)
+	}
+}
+
+func TestFindRelatedBeadIDs_DependencyTakesPrecedenceOverLabels(t *testing.T) {
+	issues := []Issue{
+		{ID: "bd-1", Title: "Feature A", Labels: []string{"sprint-1"}},
+		{
+			ID:     "bd-2",
+			Title:  "Feature B",
+			Labels: []string{"sprint-1"},
+			Dependencies: []Dependency{
+				{IssueID: "bd-2", DependsOnID: "bd-1", Type: "blocks"},
+			},
+		},
+	}
+
+	related := findRelatedBeadIDs("bd-1", issues)
+
+	// bd-2 should show dependency, not label
+	if rel, ok := related["bd-2"]; !ok {
+		t.Error("expected bd-2 to be related")
+	} else if !strings.Contains(rel, "blocked by") {
+		t.Errorf("expected 'blocked by' (dependency takes precedence), got: %q", rel)
+	}
+}
+
+func TestFindRelatedBeadIDs_ShortTitlesNotMatched(t *testing.T) {
+	issues := []Issue{
+		{ID: "bd-1", Title: "Fix bug"},
+		{ID: "bd-2", Title: "Fix bug"},
+	}
+
+	related := findRelatedBeadIDs("bd-1", issues)
+
+	// Short identical titles should not trigger fuzzy matching (too noisy)
+	if _, ok := related["bd-2"]; ok {
+		t.Error("expected short titles not to trigger fuzzy matching")
+	}
+}
+
+func TestFindRelatedBeadIDs_NoLabelsNoMatch(t *testing.T) {
+	issues := []Issue{
+		{ID: "bd-1", Title: "Completely unique first task here"},
+		{ID: "bd-2", Title: "Another totally different second task"},
+	}
+
+	related := findRelatedBeadIDs("bd-1", issues)
+
+	if len(related) != 0 {
+		t.Errorf("expected no related beads, got %d: %v", len(related), related)
+	}
+}
