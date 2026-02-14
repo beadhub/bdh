@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// Claim staleness: claims older than this threshold show a ⚠️ warning in :status and
+// ready output, prompting the agent to close or release them. 24 hours signals that a
+// claim may be abandoned (the agent crashed, lost context, or moved on without closing).
 const staleClaimThreshold = 24 * time.Hour
 
 func parseTimeBestEffort(value string) (time.Time, bool) {
