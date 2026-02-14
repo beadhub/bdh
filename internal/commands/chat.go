@@ -58,14 +58,8 @@ By default, waits 120 seconds for a reply. Use --start-conversation for
 a 5-minute wait when initiating a new exchange.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		cfg, err := loadAndValidateConfig()
 		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
-		if err := cfg.Validate(); err != nil {
-			return fmt.Errorf("invalid .beadhub config: %w", err)
-		}
-		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
 			return err
 		}
 
@@ -115,14 +109,8 @@ var chatSendAndLeaveCmd = &cobra.Command{
 	Long:  `Send a final message and exit the conversation immediately without waiting for a reply.`,
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		cfg, err := loadAndValidateConfig()
 		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
-		if err := cfg.Validate(); err != nil {
-			return fmt.Errorf("invalid .beadhub config: %w", err)
-		}
-		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
 			return err
 		}
 
@@ -166,14 +154,8 @@ var chatPendingCmd = &cobra.Command{
 	Short: "List conversations with unread messages",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		cfg, err := loadAndValidateConfig()
 		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
-		if err := cfg.Validate(); err != nil {
-			return fmt.Errorf("invalid .beadhub config: %w", err)
-		}
-		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
 			return err
 		}
 
@@ -198,14 +180,8 @@ var chatOpenCmd = &cobra.Command{
 	Short: "Read unread messages and mark as read",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		cfg, err := loadAndValidateConfig()
 		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
-		if err := cfg.Validate(); err != nil {
-			return fmt.Errorf("invalid .beadhub config: %w", err)
-		}
-		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
 			return err
 		}
 
@@ -237,14 +213,8 @@ var chatHistoryCmd = &cobra.Command{
 	Short: "Show conversation history",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		cfg, err := loadAndValidateConfig()
 		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
-		if err := cfg.Validate(); err != nil {
-			return fmt.Errorf("invalid .beadhub config: %w", err)
-		}
-		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
 			return err
 		}
 
@@ -276,14 +246,8 @@ var chatExtendWaitCmd = &cobra.Command{
 	Short: "Request more time before replying",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		cfg, err := loadAndValidateConfig()
 		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
-		if err := cfg.Validate(); err != nil {
-			return fmt.Errorf("invalid .beadhub config: %w", err)
-		}
-		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
 			return err
 		}
 
@@ -323,14 +287,8 @@ Connects to the session's SSE stream and returns when a message arrives
 or the wait timeout elapses.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		cfg, err := loadAndValidateConfig()
 		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
-		if err := cfg.Validate(); err != nil {
-			return fmt.Errorf("invalid .beadhub config: %w", err)
-		}
-		if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
 			return err
 		}
 

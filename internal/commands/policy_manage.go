@@ -16,21 +16,6 @@ import (
 	"github.com/beadhub/bdh/internal/config"
 )
 
-// loadAndValidateConfig loads and validates the .beadhub config for mutation commands.
-func loadAndValidateConfig() (*config.Config, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, fmt.Errorf("loading config: %w", err)
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid .beadhub config: %w", err)
-	}
-	if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
-		return nil, err
-	}
-	return cfg, nil
-}
-
 // --- Shared helpers ---
 
 // slugifyInvariantID converts a title to a slug: lowercase, non-alphanumeric → hyphens, collapsed, trimmed.

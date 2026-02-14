@@ -85,18 +85,8 @@ type StatusResult struct {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
+	cfg, err := loadAndValidateConfig()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("no .beadhub file found - run 'bdh :init' first")
-		}
-		return fmt.Errorf("loading config: %w", err)
-	}
-
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("invalid .beadhub config: %w", err)
-	}
-	if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
 		return err
 	}
 

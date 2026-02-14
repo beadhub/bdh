@@ -14,6 +14,25 @@ import (
 	"github.com/beadhub/bdh/internal/config"
 )
 
+// loadAndValidateConfig loads the .beadhub config file, validates it, and
+// checks that the repo origin matches the current git remote.
+func loadAndValidateConfig() (*config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("no .beadhub file found - run 'bdh :init' first")
+		}
+		return nil, fmt.Errorf("loading config: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid .beadhub config: %w", err)
+	}
+	if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
 func validateRepoOriginMatchesCurrent(cfg *config.Config) error {
 	// Allow explicit skip for legitimate testing environments
 	if os.Getenv("BEADHUB_SKIP_REPO_CHECK") == "1" {

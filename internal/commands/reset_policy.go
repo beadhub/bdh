@@ -3,12 +3,9 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
-
-	"github.com/beadhub/bdh/internal/config"
 )
 
 var resetPolicyForce bool
@@ -37,17 +34,8 @@ func runResetPolicy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("this will reset the project policy to defaults - use --force to confirm")
 	}
 
-	cfg, err := config.Load()
+	cfg, err := loadAndValidateConfig()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("no .beadhub file found - run 'bdh :init' first")
-		}
-		return fmt.Errorf("loading config: %w", err)
-	}
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("invalid .beadhub config: %w", err)
-	}
-	if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
 		return err
 	}
 
