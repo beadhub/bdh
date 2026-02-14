@@ -739,6 +739,53 @@ func (c *Client) ActivePolicyFetch(ctx context.Context, reqParams *ActivePolicyR
 	return meta, nil
 }
 
+// PolicyBundle is the full policy bundle sent when creating a new policy version.
+type PolicyBundle struct {
+	Invariants []PolicyInvariant             `json:"invariants"`
+	Roles      map[string]PolicyRolePlaybook `json:"roles"`
+	Adapters   map[string]any                `json:"adapters,omitempty"`
+}
+
+// CreatePolicyRequest is the request body for POST /v1/policies.
+type CreatePolicyRequest struct {
+	Bundle               PolicyBundle `json:"bundle"`
+	BasePolicyID         string       `json:"base_policy_id,omitempty"`
+	CreatedByWorkspaceID string       `json:"created_by_workspace_id,omitempty"`
+}
+
+// CreatePolicyResponse is the response from POST /v1/policies.
+type CreatePolicyResponse struct {
+	PolicyID  string `json:"policy_id"`
+	ProjectID string `json:"project_id"`
+	Version   int    `json:"version"`
+	Created   bool   `json:"created"`
+}
+
+// CreatePolicy creates a new policy version.
+func (c *Client) CreatePolicy(ctx context.Context, req *CreatePolicyRequest) (*CreatePolicyResponse, error) {
+	var resp CreatePolicyResponse
+	if err := c.post(ctx, "/v1/policies", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ActivatePolicyResponse is the response from POST /v1/policies/{id}/activate.
+type ActivatePolicyResponse struct {
+	Activated      bool   `json:"activated"`
+	ActivePolicyID string `json:"active_policy_id"`
+}
+
+// ActivatePolicy activates a policy version by ID.
+func (c *Client) ActivatePolicy(ctx context.Context, policyID string) (*ActivatePolicyResponse, error) {
+	var resp ActivatePolicyResponse
+	path := fmt.Sprintf("/v1/policies/%s/activate", url.PathEscape(policyID))
+	if err := c.post(ctx, path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // ResetPolicyResponse is the response from POST /v1/policies/reset.
 type ResetPolicyResponse struct {
 	Reset          bool   `json:"reset"`

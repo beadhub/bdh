@@ -45,6 +45,10 @@ func init() {
 	policyCmd.Flags().StringVar(&policyRole, "role", "", "Preview a specific role (defaults to .beadhub role)")
 	policyCmd.Flags().BoolVar(&policyOnlySelected, "only-selected", true, "Show only invariants + selected role playbook (set false to include all roles)")
 	policyCmd.Flags().StringVar(&policyFormat, "format", "plain", "Output format: plain or markdown")
+
+	policyCmd.AddCommand(policyAddCmd)
+	policyCmd.AddCommand(policyEditCmd)
+	policyCmd.AddCommand(policyDeleteCmd)
 }
 
 type PolicyCacheInfo struct {
