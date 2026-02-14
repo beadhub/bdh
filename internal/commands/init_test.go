@@ -1349,3 +1349,123 @@ func TestInitCommand_APIKeyFromEnvVar(t *testing.T) {
 		t.Errorf("Authorization = %q, want Bearer with env var API key", gotAuth)
 	}
 }
+
+func TestInitCommand_MultiProjectRepo_ShowsProjects(t *testing.T) {
+	setupTempWorkspace(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/workspaces/suggest-name-prefix":
+			// Return 409: repo exists in multiple projects
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(`{"error":"repo exists in multiple projects"}`))
+		case "/v1/projects":
+			// Return list of candidate projects
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{
+					{"id": "proj-1", "slug": "project-alpha", "name": "Project Alpha"},
+					{"id": "proj-2", "slug": "project-beta", "name": "Project Beta"},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ROLE", "developer")
+	// No BEADHUB_PROJECT set — should trigger multi-project error
+
+	err := runInit()
+	if err == nil {
+		t.Fatal("runInit() should error when repo exists in multiple projects")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "multiple projects") {
+		t.Errorf("error should mention 'multiple projects', got: %v", err)
+	}
+	if !strings.Contains(errStr, "project-alpha") {
+		t.Errorf("error should list project-alpha, got: %v", err)
+	}
+	if !strings.Contains(errStr, "project-beta") {
+		t.Errorf("error should list project-beta, got: %v", err)
+	}
+	if !strings.Contains(errStr, "--project") {
+		t.Errorf("error should mention --project flag, got: %v", err)
+	}
+}
+
+func TestInitCommand_MultiProjectRepo_ListProjectsFails(t *testing.T) {
+	setupTempWorkspace(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/workspaces/suggest-name-prefix":
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(`{"error":"repo exists in multiple projects"}`))
+		case "/v1/projects":
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"internal server error"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ROLE", "developer")
+
+	err := runInit()
+	if err == nil {
+		t.Fatal("runInit() should error when repo exists in multiple projects")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "multiple projects") {
+		t.Errorf("error should mention 'multiple projects', got: %v", err)
+	}
+	if !strings.Contains(errStr, "--project") {
+		t.Errorf("error should mention --project flag, got: %v", err)
+	}
+	// Should include reason why project listing failed
+	if !strings.Contains(errStr, "could not list") {
+		t.Errorf("error should explain listing failure, got: %v", err)
+	}
+}
+
+func TestInitCommand_MultiProjectRepo_ListProjectsEmpty(t *testing.T) {
+	setupTempWorkspace(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/workspaces/suggest-name-prefix":
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(`{"error":"repo exists in multiple projects"}`))
+		case "/v1/projects":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("BEADHUB_URL", server.URL)
+	t.Setenv("BEADHUB_REPO_ORIGIN", "git@github.com:test/repo.git")
+	t.Setenv("BEADHUB_ROLE", "developer")
+
+	err := runInit()
+	if err == nil {
+		t.Fatal("runInit() should error when repo exists in multiple projects")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "multiple projects") {
+		t.Errorf("error should mention 'multiple projects', got: %v", err)
+	}
+	if !strings.Contains(errStr, "--project") {
+		t.Errorf("error should mention --project flag, got: %v", err)
+	}
+}

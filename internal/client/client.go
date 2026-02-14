@@ -293,14 +293,33 @@ type LookupRepoResponse struct {
 	Name            string `json:"name"`
 }
 
+// ErrRepoMultipleProjects is returned when a repo exists in multiple projects
+// and the caller must specify which one to use.
+type ErrRepoMultipleProjects struct {
+	Message string
+	Body    string
+}
+
+func (e *ErrRepoMultipleProjects) Error() string {
+	return e.Message
+}
+
 // LookupRepo looks up a repo by origin URL.
 // Returns the repo and its project if found, nil if not found (404).
+// Returns ErrRepoMultipleProjects if the repo exists in multiple projects (409).
 func (c *Client) LookupRepo(ctx context.Context, req *LookupRepoRequest) (*LookupRepoResponse, error) {
 	var resp LookupRepoResponse
 	if err := c.post(ctx, "/v1/repos/lookup", req, &resp); err != nil {
-		// Return nil for 404 (not found)
-		if clientErr, ok := err.(*Error); ok && clientErr.StatusCode == 404 {
-			return nil, nil
+		if clientErr, ok := err.(*Error); ok {
+			if clientErr.StatusCode == 404 {
+				return nil, nil
+			}
+			if clientErr.StatusCode == 409 {
+				return nil, &ErrRepoMultipleProjects{
+					Message: "repo exists in multiple projects; use --project to specify which one",
+					Body:    clientErr.Body,
+				}
+			}
 		}
 		return nil, err
 	}

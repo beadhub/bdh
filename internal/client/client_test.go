@@ -3,8 +3,10 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -666,5 +668,57 @@ func TestNewWithAPIKey_GETSendsAuthorizationHeader(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("ActivePolicy() error: %v", err)
+	}
+}
+
+func TestLookupRepo_Returns409AsErrRepoMultipleProjects(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`{"error":"repo exists in multiple projects","projects":["proj-a","proj-b"]}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.LookupRepo(context.Background(), &LookupRepoRequest{
+		OriginURL: "git@github.com:test/repo.git",
+	})
+
+	if resp != nil {
+		t.Fatalf("expected nil response, got %v", resp)
+	}
+	if err == nil {
+		t.Fatal("expected error for 409")
+	}
+
+	var multiErr *ErrRepoMultipleProjects
+	if !errors.As(err, &multiErr) {
+		t.Fatalf("expected ErrRepoMultipleProjects, got %T: %v", err, err)
+	}
+	if !strings.Contains(multiErr.Error(), "multiple projects") {
+		t.Errorf("expected 'multiple projects' in error, got: %v", multiErr)
+	}
+	expectedBody := `{"error":"repo exists in multiple projects","projects":["proj-a","proj-b"]}`
+	if multiErr.Body != expectedBody {
+		t.Errorf("expected Body %q, got %q", expectedBody, multiErr.Body)
+	}
+}
+
+func TestLookupRepo_Returns404AsNil(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"not found"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.LookupRepo(context.Background(), &LookupRepoRequest{
+		OriginURL: "git@github.com:test/repo.git",
+	})
+
+	if err != nil {
+		t.Fatalf("expected nil error for 404, got: %v", err)
+	}
+	if resp != nil {
+		t.Fatalf("expected nil response for 404, got: %v", resp)
 	}
 }

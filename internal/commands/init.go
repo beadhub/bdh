@@ -532,6 +532,9 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 			suggestedAlias = serverSuggested
 		} else {
 			var clientErr *client.Error
+			if errors.As(err, &clientErr) && clientErr.StatusCode == 409 {
+				return multiProjectError(beadhubURL, initAPIKey)
+			}
 			if errors.As(err, &clientErr) && clientErr.StatusCode != 404 {
 				return fmt.Errorf("failed to get alias suggestion: %w", err)
 			}
@@ -778,6 +781,33 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 	PrintClaudeHooksResult(hooksResult)
 
 	return nil
+}
+
+// multiProjectError lists available projects and returns an error guiding the user to use --project.
+func multiProjectError(beadhubURL, apiKey string) error {
+	var c *client.Client
+	if strings.TrimSpace(apiKey) != "" {
+		c = client.NewWithAPIKey(beadhubURL, apiKey)
+	} else {
+		c = client.New(beadhubURL)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+
+	resp, err := c.ListProjects(ctx)
+	if err != nil {
+		return fmt.Errorf("this repo exists in multiple projects (could not list them: %v). Use --project to specify which one", err)
+	}
+	if len(resp.Projects) == 0 {
+		return fmt.Errorf("this repo exists in multiple projects. Use --project to specify which one")
+	}
+
+	var sb strings.Builder
+	sb.WriteString("This repo exists in multiple projects. Use --project to specify which one:\n\n")
+	for _, p := range resp.Projects {
+		sb.WriteString(fmt.Sprintf("  bdh :init --project %s\n", p.Slug))
+	}
+	return fmt.Errorf("%s", sb.String())
 }
 
 // apiKeyFromStoredConfig looks up an existing API key from the global aw config
