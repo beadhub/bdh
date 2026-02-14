@@ -16,6 +16,21 @@ import (
 	"github.com/beadhub/bdh/internal/config"
 )
 
+// loadAndValidateConfig loads and validates the .beadhub config for mutation commands.
+func loadAndValidateConfig() (*config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("loading config: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid .beadhub config: %w", err)
+	}
+	if err := validateRepoOriginMatchesCurrent(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
 // --- Shared helpers ---
 
 // slugifyInvariantID converts a title to a slug: lowercase, non-alphanumeric → hyphens, collapsed, trimmed.
@@ -147,9 +162,9 @@ func runPolicyAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("exactly one of --invariant or --role is required")
 	}
 
-	cfg, err := config.Load()
+	cfg, err := loadAndValidateConfig()
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return err
 	}
 
 	if policyAddInvariant {
@@ -213,7 +228,7 @@ func addRole(cfg *config.Config) error {
 			return fmt.Errorf("role %q already exists", name)
 		}
 		bundle.Roles[name] = client.PolicyRolePlaybook{
-			Title:      capitalizeFirst(name),
+			Title:      capitalizeWords(name),
 			PlaybookMD: playbook,
 		}
 		fmt.Fprintf(os.Stderr, "Added role %q\n", name)
@@ -258,9 +273,9 @@ func runPolicyEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("exactly one of --invariant or --role is required")
 	}
 
-	cfg, err := config.Load()
+	cfg, err := loadAndValidateConfig()
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return err
 	}
 
 	if hasInvariant {
@@ -347,9 +362,9 @@ func runPolicyDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("exactly one of --invariant or --role is required")
 	}
 
-	cfg, err := config.Load()
+	cfg, err := loadAndValidateConfig()
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return err
 	}
 
 	if hasInvariant {
@@ -387,12 +402,15 @@ func deleteRole(cfg *config.Config) error {
 	})
 }
 
-// capitalizeFirst uppercases the first rune of a string.
-func capitalizeFirst(s string) string {
-	if s == "" {
-		return s
+// capitalizeWords uppercases the first letter of each word.
+func capitalizeWords(s string) string {
+	words := strings.Fields(s)
+	for i, w := range words {
+		if w != "" {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
+	return strings.Join(words, " ")
 }
 
 // --- Formatting helpers ---

@@ -366,6 +366,38 @@ func TestPolicyDelete_Role(t *testing.T) {
 	}
 }
 
+// --- Duplicate role on add ---
+
+func TestPolicyAdd_DuplicateRole(t *testing.T) {
+	t.Setenv("BEADHUB_API_KEY", "aw_sk_test")
+
+	body := activePolicyJSON("pol-1", nil, map[string]client.PolicyRolePlaybook{
+		"reviewer": {Title: "Reviewer", PlaybookMD: "Existing"},
+	})
+
+	server := policyMutationServer(t, body, nil, nil)
+	defer server.Close()
+
+	cfg := &config.Config{BeadhubURL: server.URL}
+	policyAddName = "reviewer"
+	policyAddPlaybook = "New playbook"
+	policyAddInvariant = false
+	policyAddRole = true
+	defer func() {
+		policyAddName = ""
+		policyAddPlaybook = ""
+		policyAddRole = false
+	}()
+
+	err := addRole(cfg)
+	if err == nil {
+		t.Fatal("expected error for duplicate role")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("expected 'already exists' error, got: %v", err)
+	}
+}
+
 // --- Duplicate invariant on add ---
 
 func TestPolicyAdd_DuplicateInvariant(t *testing.T) {
