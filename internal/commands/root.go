@@ -140,13 +140,7 @@ func Execute() error {
 
 	// Version: show bdh version, then bd version
 	if firstArg == "-V" || firstArg == "--version" {
-		fmt.Printf("bdh %s\n", versionInfo.version)
-		if versionInfo.commit != "" && versionInfo.commit != "none" {
-			fmt.Printf("  commit: %s\n", versionInfo.commit)
-		}
-		if versionInfo.date != "" && versionInfo.date != "unknown" {
-			fmt.Printf("  built:  %s\n", versionInfo.date)
-		}
+		fmt.Print(formatVersionOutput())
 		checkLatestVersion(os.Stdout, "")
 		fmt.Println()
 		return executePassthrough([]string{"--version"})
