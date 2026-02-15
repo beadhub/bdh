@@ -1084,11 +1084,14 @@ func TestInitCommand_APIKeyHandles401(t *testing.T) {
 	if err == nil {
 		t.Fatal("runInit() should error on 401")
 	}
-	if !strings.Contains(err.Error(), "API key invalid or expired") {
-		t.Errorf("error should mention API key invalid or expired, got: %v", err)
+	if !strings.Contains(err.Error(), "API key rejected (401)") {
+		t.Errorf("error should mention API key rejected, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "dashboard") {
-		t.Errorf("error should mention dashboard for key generation, got: %v", err)
+	if !strings.Contains(err.Error(), "invalid_api_key") {
+		t.Errorf("error should include server response body, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "refresh-key") {
+		t.Errorf("error should suggest refresh-key, got: %v", err)
 	}
 }
 
@@ -1302,8 +1305,8 @@ func TestInitCommand_APIKeyFromStoredConfig_FallsBackOn401(t *testing.T) {
 	if err == nil {
 		t.Fatal("runInit() should error on 401 with stored key")
 	}
-	if !strings.Contains(err.Error(), "API key invalid or expired") {
-		t.Errorf("error should mention API key invalid or expired, got: %v", err)
+	if !strings.Contains(err.Error(), "API key rejected (401)") {
+		t.Errorf("error should mention API key rejected, got: %v", err)
 	}
 }
 

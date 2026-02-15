@@ -216,6 +216,18 @@ func runAddWorktree(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Resolve the source workspace's API key while still in its directory.
+	// The new worktree won't have .aw/context yet, so apiKeyFromStoredConfig
+	// would non-deterministically pick from all accounts matching the server.
+	sourceAuth, err := resolveBeadhubAuth(cfg.BeadhubURL)
+	if err != nil {
+		return fmt.Errorf("failed to resolve API key from source workspace: %w", err)
+	}
+	if sourceAuth == nil || sourceAuth.APIKey == "" {
+		return fmt.Errorf("source workspace has no API key configured (run 'bdh :init' to fix)")
+	}
+	sourceAPIKey := sourceAuth.APIKey
+
 	origDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
@@ -280,6 +292,7 @@ func runAddWorktree(cmd *cobra.Command, args []string) error {
 		initRole = normalizedRole
 		initHuman = cfg.HumanName
 		initProject = cfg.ProjectSlug
+		initAPIKey = sourceAPIKey
 
 		initErr := runInit()
 		_ = os.Chdir(origDir)

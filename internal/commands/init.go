@@ -595,7 +595,7 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 		if clientErr, ok := err.(*client.Error); ok {
 			// API key auth: 401 means invalid/expired key — fail immediately
 			if initAPIKey != "" && clientErr.StatusCode == 401 {
-				return fmt.Errorf("API key invalid or expired. Generate a new key from your BeadHub dashboard")
+				return fmt.Errorf("API key rejected (401): %s\nTry: bdh :init --refresh-key", clientErr.Body)
 			}
 			// Parse error body for code
 			if strings.Contains(clientErr.Body, "project_not_found") {
