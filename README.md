@@ -29,7 +29,7 @@ bdh :update
 ## Quick Start
 
 Prerequisites:
-- [Beads](https://github.com/steveyegge/beads) (`bd` CLI) for issue tracking: `curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash`
+- [Beads](https://github.com/steveyegge/beads) (`bd` CLI) for issue tracking: `brew install beads`
 - A [BeadHub](https://github.com/beadhub/beadhub) server (self-hosted or [beadhub.ai](https://beadhub.ai))
 - A git repository with a remote origin
 
