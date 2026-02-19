@@ -106,6 +106,22 @@ func parseJumpIn(args []string) (cleanArgs []string, message string, hasJumpIn b
 	return cleanArgs, message, hasJumpIn
 }
 
+// parseVerbose parses the --:verbose flag from args.
+// Returns cleanArgs with the flag removed, and whether it was present.
+func parseVerbose(args []string) (cleanArgs []string, verbose bool) {
+	cleanArgs = make([]string, 0, len(args))
+
+	for _, arg := range args {
+		if arg == "--:verbose" {
+			verbose = true
+			continue
+		}
+		cleanArgs = append(cleanArgs, arg)
+	}
+
+	return cleanArgs, verbose
+}
+
 // RelatedWorkItem represents a bead being worked on that is related to the one just closed.
 type RelatedWorkItem struct {
 	BeadID      string // e.g., "bd-43"
@@ -184,6 +200,9 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("no command provided")
 	}
+
+	// Parse --:verbose flag
+	args, verbose := parseVerbose(args)
 
 	// Parse --:jump-in flag (must be done before validation)
 	cleanArgs, jumpInMessage, hasJumpIn := parseJumpIn(args)
@@ -440,7 +459,7 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 
 	// Sync after mutation commands (non-blocking - just warn on failure)
 	if bd.IsMutationCommand(cleanArgs) && bdResult.ExitCode == 0 {
-		syncResult := syncToBeadHub(cfg, cleanArgs)
+		syncResult := syncToBeadHub(cfg, cleanArgs, verbose)
 		if syncResult.Warning != "" {
 			result.SyncWarning = syncResult.Warning
 		}
@@ -734,7 +753,7 @@ type SyncResult struct {
 // syncToBeadHub reads issues.jsonl from the beads directory and syncs to BeadHub.
 // Uses incremental sync when possible (only sending changed issues).
 // Returns warning on failure but never errors (non-blocking design).
-func syncToBeadHub(cfg *config.Config, bdArgs []string) *SyncResult {
+func syncToBeadHub(cfg *config.Config, bdArgs []string, verbose bool) *SyncResult {
 	result := &SyncResult{}
 
 	issuesPath, exportArgs := resolveIssuesPathAndExportArgs(bdArgs)
@@ -745,13 +764,30 @@ func syncToBeadHub(cfg *config.Config, bdArgs []string) *SyncResult {
 	exportCtx, exportCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer exportCancel()
 	exportResult, exportErr := exportRunner.Run(exportCtx, exportArgs)
+
+	exportFailed := false
 	if exportErr != nil {
-		result.Warning = "bd export failed - aborting sync to prevent stale data upload"
-		return result
+		exportFailed = true
+		result.Warning = formatExportWarning("bd export failed", exportErr.Error(), exportArgs, verbose)
+	} else if exportResult.ExitCode != 0 {
+		exportFailed = true
+		stderr := strings.TrimSpace(exportResult.Stderr)
+		summary := fmt.Sprintf("bd export failed (exit %d)", exportResult.ExitCode)
+		if stderr != "" {
+			// Include first line of stderr in the summary.
+			firstLine := strings.SplitN(stderr, "\n", 2)[0]
+			summary += ": " + firstLine
+		}
+		result.Warning = formatExportWarning(summary, stderr, exportArgs, verbose)
 	}
-	if exportResult.ExitCode != 0 {
-		result.Warning = fmt.Sprintf("bd export failed (exit %d) - aborting sync to prevent stale data upload", exportResult.ExitCode)
-		return result
+
+	if exportFailed {
+		// Fall back to existing JSONL if available.
+		if _, err := os.Stat(issuesPath); err != nil {
+			// No JSONL to fall back to — cannot sync.
+			return result
+		}
+		result.Warning += "\n  Synced using existing issues.jsonl"
 	}
 
 	// Read issues.jsonl
@@ -905,6 +941,25 @@ func syncToBeadHub(cfg *config.Config, bdArgs []string) *SyncResult {
 	result.Stats = resp.Stats
 
 	return result
+}
+
+// formatExportWarning builds the warning message for a failed bd export.
+// Without verbose: summary + hint to use --:verbose.
+// With verbose: summary + full command line + full stderr.
+func formatExportWarning(summary string, stderr string, exportArgs []string, verbose bool) string {
+	if verbose {
+		var sb strings.Builder
+		sb.WriteString(summary)
+		sb.WriteString("\n  Command: bd " + strings.Join(exportArgs, " "))
+		if stderr != "" {
+			sb.WriteString("\n  Stderr:\n")
+			for _, line := range strings.Split(stderr, "\n") {
+				sb.WriteString("    " + line + "\n")
+			}
+		}
+		return sb.String()
+	}
+	return summary + "\n  Use --:verbose for full error details"
 }
 
 func resolveIssuesPathAndExportArgs(bdArgs []string) (issuesPath string, exportArgs []string) {

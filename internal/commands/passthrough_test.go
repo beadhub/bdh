@@ -2146,3 +2146,320 @@ func TestFindRelatedBeadIDs_NoLabelsNoMatch(t *testing.T) {
 		t.Errorf("expected no related beads, got %d: %v", len(related), related)
 	}
 }
+
+func TestParseVerbose_ExtractsAndStripsFlag(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantArgs    []string
+		wantVerbose bool
+	}{
+		{
+			name:        "no verbose flag",
+			args:        []string{"sync"},
+			wantArgs:    []string{"sync"},
+			wantVerbose: false,
+		},
+		{
+			name:        "verbose at end",
+			args:        []string{"create", "--title", "Test", "--:verbose"},
+			wantArgs:    []string{"create", "--title", "Test"},
+			wantVerbose: true,
+		},
+		{
+			name:        "verbose in middle",
+			args:        []string{"create", "--:verbose", "--title", "Test"},
+			wantArgs:    []string{"create", "--title", "Test"},
+			wantVerbose: true,
+		},
+		{
+			name:        "verbose with other bdh flags",
+			args:        []string{"update", "bd-42", "--:verbose", "--:jump-in", "reason"},
+			wantArgs:    []string{"update", "bd-42", "--:jump-in", "reason"},
+			wantVerbose: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotArgs, gotVerbose := parseVerbose(tt.args)
+
+			if gotVerbose != tt.wantVerbose {
+				t.Errorf("verbose = %v, want %v", gotVerbose, tt.wantVerbose)
+			}
+			if len(gotArgs) != len(tt.wantArgs) {
+				t.Errorf("args length = %d, want %d\n  got:  %v\n  want: %v", len(gotArgs), len(tt.wantArgs), gotArgs, tt.wantArgs)
+			} else {
+				for i := range gotArgs {
+					if gotArgs[i] != tt.wantArgs[i] {
+						t.Errorf("args[%d] = %q, want %q", i, gotArgs[i], tt.wantArgs[i])
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestPassthrough_ExportFailureFallsBackToExistingJSONL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a sh stub for bd")
+	}
+
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+	os.Chdir(tmpDir)
+
+	os.MkdirAll(".beads", 0755)
+	// Pre-existing JSONL with content (simulates multi-agent scenario where
+	// JSONL has more issues than the local database).
+	os.WriteFile(".beads/issues.jsonl",
+		[]byte(`{"id":"bd-1","title":"Test","status":"open","priority":2,"issue_type":"task"}`+"\n"),
+		0644)
+
+	// Stub bd: create succeeds, export fails with exit 1 and stderr message.
+	binDir := filepath.Join(tmpDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	bdPath := filepath.Join(binDir, "bd")
+	script := `#!/bin/sh
+cmd="$1"
+shift || true
+case "$cmd" in
+  create)
+    echo '{"id":"bd-2","title":"New","status":"open","priority":2,"issue_type":"task"}'
+    ;;
+  export)
+    echo "Error: refusing to export stale database that would lose issues" >&2
+    exit 1
+    ;;
+  *)
+    ;;
+esac
+`
+	os.WriteFile(bdPath, []byte(script), 0755)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BEADHUB_SKIP_REPO_CHECK", "1")
+
+	var syncCalled bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/bdh/command" {
+			json.NewEncoder(w).Encode(map[string]any{"approved": true, "context": map[string]any{}})
+			return
+		}
+		if r.URL.Path == "/v1/chat/pending" {
+			json.NewEncoder(w).Encode(map[string]any{"pending": []any{}, "messages_waiting": 0})
+			return
+		}
+		if r.URL.Path == "/v1/bdh/sync" {
+			syncCalled = true
+			json.NewEncoder(w).Encode(map[string]any{"synced": true, "issues_count": 1})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+		BeadhubURL:      server.URL,
+		ProjectSlug:     "test-project",
+		RepoID:          "c3d4e5f6-7890-12cd-ef01-345678901234",
+		RepoOrigin:      "git@github.com:test/repo.git",
+		CanonicalOrigin: "github.com/test/repo",
+		Alias:           "test-agent",
+		HumanName:       "Test Human",
+	}
+	cfg.Save()
+
+	result, err := runPassthrough([]string{"create", "--title", "New", "--json"})
+	if err != nil {
+		t.Fatalf("runPassthrough error: %v", err)
+	}
+
+	// Sync should still be called — falling back to existing JSONL.
+	if !syncCalled {
+		t.Error("expected sync to proceed using existing issues.jsonl when export fails")
+	}
+
+	// Warning should mention export failure and include bd's stderr.
+	if result.SyncWarning == "" {
+		t.Fatal("expected a sync warning about export failure")
+	}
+	if !strings.Contains(result.SyncWarning, "refusing to export stale database") {
+		t.Errorf("warning should include bd stderr, got: %q", result.SyncWarning)
+	}
+	// Warning should suggest --:verbose when not in verbose mode.
+	if !strings.Contains(result.SyncWarning, "--:verbose") {
+		t.Errorf("warning should suggest --:verbose, got: %q", result.SyncWarning)
+	}
+}
+
+func TestPassthrough_ExportFailureNoJSONLAborts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a sh stub for bd")
+	}
+
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+	os.Chdir(tmpDir)
+
+	os.MkdirAll(".beads", 0755)
+	// No pre-existing issues.jsonl — export failure means no data to sync.
+
+	binDir := filepath.Join(tmpDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	bdPath := filepath.Join(binDir, "bd")
+	script := `#!/bin/sh
+cmd="$1"
+shift || true
+case "$cmd" in
+  create)
+    echo '{"id":"bd-1","title":"Test","status":"open","priority":2,"issue_type":"task"}'
+    ;;
+  export)
+    echo "Error: database locked" >&2
+    exit 1
+    ;;
+  *)
+    ;;
+esac
+`
+	os.WriteFile(bdPath, []byte(script), 0755)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BEADHUB_SKIP_REPO_CHECK", "1")
+
+	var syncCalled bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/bdh/command" {
+			json.NewEncoder(w).Encode(map[string]any{"approved": true, "context": map[string]any{}})
+			return
+		}
+		if r.URL.Path == "/v1/chat/pending" {
+			json.NewEncoder(w).Encode(map[string]any{"pending": []any{}, "messages_waiting": 0})
+			return
+		}
+		if r.URL.Path == "/v1/bdh/sync" {
+			syncCalled = true
+			json.NewEncoder(w).Encode(map[string]any{"synced": true, "issues_count": 1})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+		BeadhubURL:      server.URL,
+		ProjectSlug:     "test-project",
+		RepoID:          "c3d4e5f6-7890-12cd-ef01-345678901234",
+		RepoOrigin:      "git@github.com:test/repo.git",
+		CanonicalOrigin: "github.com/test/repo",
+		Alias:           "test-agent",
+		HumanName:       "Test Human",
+	}
+	cfg.Save()
+
+	result, err := runPassthrough([]string{"create", "--title", "Test", "--json"})
+	if err != nil {
+		t.Fatalf("runPassthrough error: %v", err)
+	}
+
+	// Sync should NOT be called — no JSONL to fall back to.
+	if syncCalled {
+		t.Error("sync should not be called when export fails and no JSONL exists")
+	}
+
+	// Warning should include bd's stderr.
+	if result.SyncWarning == "" {
+		t.Fatal("expected a sync warning")
+	}
+	if !strings.Contains(result.SyncWarning, "database locked") {
+		t.Errorf("warning should include bd stderr, got: %q", result.SyncWarning)
+	}
+}
+
+func TestPassthrough_ExportFailureVerboseShowsCommandLine(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a sh stub for bd")
+	}
+
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+	os.Chdir(tmpDir)
+
+	os.MkdirAll(".beads", 0755)
+	os.WriteFile(".beads/issues.jsonl",
+		[]byte(`{"id":"bd-1","title":"Test","status":"open","priority":2,"issue_type":"task"}`+"\n"),
+		0644)
+
+	binDir := filepath.Join(tmpDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	bdPath := filepath.Join(binDir, "bd")
+	script := `#!/bin/sh
+cmd="$1"
+shift || true
+case "$cmd" in
+  create)
+    echo '{"id":"bd-2","title":"New","status":"open","priority":2,"issue_type":"task"}'
+    ;;
+  export)
+    echo "Error: refusing to export stale database" >&2
+    exit 1
+    ;;
+  *)
+    ;;
+esac
+`
+	os.WriteFile(bdPath, []byte(script), 0755)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BEADHUB_SKIP_REPO_CHECK", "1")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/bdh/command" {
+			json.NewEncoder(w).Encode(map[string]any{"approved": true, "context": map[string]any{}})
+			return
+		}
+		if r.URL.Path == "/v1/chat/pending" {
+			json.NewEncoder(w).Encode(map[string]any{"pending": []any{}, "messages_waiting": 0})
+			return
+		}
+		if r.URL.Path == "/v1/bdh/sync" {
+			json.NewEncoder(w).Encode(map[string]any{"synced": true, "issues_count": 1})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+		BeadhubURL:      server.URL,
+		ProjectSlug:     "test-project",
+		RepoID:          "c3d4e5f6-7890-12cd-ef01-345678901234",
+		RepoOrigin:      "git@github.com:test/repo.git",
+		CanonicalOrigin: "github.com/test/repo",
+		Alias:           "test-agent",
+		HumanName:       "Test Human",
+	}
+	cfg.Save()
+
+	// Pass --:verbose — should show command line in warning.
+	result, err := runPassthrough([]string{"create", "--title", "New", "--json", "--:verbose"})
+	if err != nil {
+		t.Fatalf("runPassthrough error: %v", err)
+	}
+
+	if result.SyncWarning == "" {
+		t.Fatal("expected a sync warning about export failure")
+	}
+	// With --:verbose, warning should include the command that was run.
+	if !strings.Contains(result.SyncWarning, "bd export") {
+		t.Errorf("verbose warning should include command line, got: %q", result.SyncWarning)
+	}
+	// Should NOT suggest --:verbose since we're already verbose.
+	if strings.Contains(result.SyncWarning, "--:verbose") {
+		t.Errorf("verbose warning should not suggest --:verbose again, got: %q", result.SyncWarning)
+	}
+}

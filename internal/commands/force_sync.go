@@ -39,7 +39,7 @@ func runForceSync(cmd *cobra.Command, args []string) error {
 	fmt.Println("Sync cache cleared, performing full sync...")
 
 	// Trigger full sync
-	result := syncToBeadHub(cfg, nil)
+	result := syncToBeadHub(cfg, nil, false)
 
 	if result.Warning != "" {
 		return fmt.Errorf("sync failed: %s", result.Warning)
