@@ -2462,4 +2462,11 @@ esac
 	if strings.Contains(result.SyncWarning, "--:verbose") {
 		t.Errorf("verbose warning should not suggest --:verbose again, got: %q", result.SyncWarning)
 	}
+	// Should include fallback message without double newlines.
+	if !strings.Contains(result.SyncWarning, "Synced using existing issues.jsonl") {
+		t.Errorf("verbose warning should include fallback message, got: %q", result.SyncWarning)
+	}
+	if strings.Contains(result.SyncWarning, "\n\n") {
+		t.Errorf("verbose warning should not have blank lines, got: %q", result.SyncWarning)
+	}
 }

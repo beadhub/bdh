@@ -787,7 +787,7 @@ func syncToBeadHub(cfg *config.Config, bdArgs []string, verbose bool) *SyncResul
 			// No JSONL to fall back to — cannot sync.
 			return result
 		}
-		result.Warning += "\n  Synced using existing issues.jsonl"
+		result.Warning = strings.TrimRight(result.Warning, "\n") + "\n  Synced using existing issues.jsonl"
 	}
 
 	// Read issues.jsonl
