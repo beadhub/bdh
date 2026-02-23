@@ -415,7 +415,7 @@ func TestFormatChatOpenOutput_NotWaiting(t *testing.T) {
 }
 
 func TestFormatExtendWaitOutput(t *testing.T) {
-	result := &chat.HangOnResult{
+	result := &chat.ExtendWaitResult{
 		SessionID:          "s1",
 		TargetAgent:        "bob",
 		Message:            "Working on it...",
@@ -435,7 +435,7 @@ func TestFormatExtendWaitOutput(t *testing.T) {
 }
 
 func TestFormatExtendWaitOutput_NoExtension(t *testing.T) {
-	result := &chat.HangOnResult{
+	result := &chat.ExtendWaitResult{
 		SessionID:          "s1",
 		TargetAgent:        "bob",
 		Message:            "Thinking...",
@@ -449,7 +449,7 @@ func TestFormatExtendWaitOutput_NoExtension(t *testing.T) {
 }
 
 func TestFormatExtendWaitOutput_JSON(t *testing.T) {
-	result := &chat.HangOnResult{
+	result := &chat.ExtendWaitResult{
 		SessionID:          "s1",
 		TargetAgent:        "bob",
 		Message:            "Hold on",

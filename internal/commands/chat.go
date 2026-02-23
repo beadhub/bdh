@@ -269,7 +269,7 @@ var chatExtendWaitCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(baseCtx, apiTimeout)
 		defer cancel()
 
-		result, err := chat.HangOn(ctx, aw, targetAgent, args[1])
+		result, err := chat.ExtendWait(ctx, aw, targetAgent, args[1])
 		if err != nil {
 			return err
 		}
@@ -641,7 +641,7 @@ func formatChatOpenOutput(result *chat.OpenResult, asJSON bool) string {
 }
 
 // formatExtendWaitOutput formats the extend-wait result for display.
-func formatExtendWaitOutput(result *chat.HangOnResult, asJSON bool) string {
+func formatExtendWaitOutput(result *chat.ExtendWaitResult, asJSON bool) string {
 	if asJSON {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return string(data) + "\n"
