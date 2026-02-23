@@ -18,6 +18,11 @@ type beadhubAuthSelection struct {
 	DefaultProject string
 	AgentID        string
 	AgentAlias     string
+	NamespaceSlug  string
+	DID            string
+	SigningKey     string
+	Custody        string
+	Lifetime       string
 }
 
 func apiKeyFromEnv() string {
@@ -69,6 +74,11 @@ func resolveBeadhubAuth(beadhubURLHint string) (*beadhubAuthSelection, error) {
 		DefaultProject: sel.DefaultProject,
 		AgentID:        sel.AgentID,
 		AgentAlias:     sel.AgentAlias,
+		NamespaceSlug:  sel.NamespaceSlug,
+		DID:            sel.DID,
+		SigningKey:     sel.SigningKey,
+		Custody:        sel.Custody,
+		Lifetime:       sel.Lifetime,
 	}, nil
 }
 

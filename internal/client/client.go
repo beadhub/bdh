@@ -202,6 +202,10 @@ type InitResponse struct {
 	Alias            string `json:"alias"`
 	Created          bool   `json:"created"`           // True if aweb agent was newly created
 	WorkspaceCreated bool   `json:"workspace_created"` // True if BeadHub workspace was newly created
+	NamespaceSlug    string `json:"namespace_slug,omitempty"`
+	DID              string `json:"did,omitempty"`
+	Custody          string `json:"custody,omitempty"`
+	Lifetime         string `json:"lifetime,omitempty"`
 }
 
 // Init atomically creates project/repo/workspace/api_key via POST /v1/init.

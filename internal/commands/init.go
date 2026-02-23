@@ -724,7 +724,17 @@ func runInitWithNewEndpoint(needsBeadsInit bool) error {
 	}
 
 	// Persist a beadhub account (API key) globally and create worktree-local context.
-	accountName, serverName, err := persistBeadhubAccountAndContext(beadhubURL, cfg.ProjectSlug, cfg.Alias, initResp.APIKey, cfg.WorkspaceID)
+	accountName, serverName, err := persistBeadhubAccountAndContext(persistAccountParams{
+		BeadhubURL:    beadhubURL,
+		ProjectSlug:   cfg.ProjectSlug,
+		Alias:         cfg.Alias,
+		APIKey:        initResp.APIKey,
+		AgentID:       cfg.WorkspaceID,
+		NamespaceSlug: initResp.NamespaceSlug,
+		DID:           initResp.DID,
+		Custody:       initResp.Custody,
+		Lifetime:      initResp.Lifetime,
+	})
 	if err != nil {
 		cleanup()
 		return fmt.Errorf("failed to persist account/context: %w", err)
@@ -944,13 +954,17 @@ func refreshWorkspaceKeyAndConfigWithOptions(cfg *config.Config, quiet bool) err
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	accountName, serverName, err := persistBeadhubAccountAndContext(
-		beadhubURL,
-		cfg.ProjectSlug,
-		cfg.Alias,
-		initResp.APIKey,
-		cfg.WorkspaceID,
-	)
+	accountName, serverName, err := persistBeadhubAccountAndContext(persistAccountParams{
+		BeadhubURL:    beadhubURL,
+		ProjectSlug:   cfg.ProjectSlug,
+		Alias:         cfg.Alias,
+		APIKey:        initResp.APIKey,
+		AgentID:       cfg.WorkspaceID,
+		NamespaceSlug: initResp.NamespaceSlug,
+		DID:           initResp.DID,
+		Custody:       initResp.Custody,
+		Lifetime:      initResp.Lifetime,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to persist account/context: %w", err)
 	}

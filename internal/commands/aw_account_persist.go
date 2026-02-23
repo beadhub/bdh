@@ -10,12 +10,24 @@ import (
 	"github.com/beadhub/bdh/internal/config"
 )
 
-func persistBeadhubAccountAndContext(beadhubURL, projectSlug, alias, apiKey, agentID string) (accountName string, serverName string, err error) {
-	serverName, err = awconfig.DeriveServerNameFromURL(beadhubURL)
+type persistAccountParams struct {
+	BeadhubURL    string
+	ProjectSlug   string
+	Alias         string
+	APIKey        string
+	AgentID       string
+	NamespaceSlug string
+	DID           string
+	Custody       string
+	Lifetime      string
+}
+
+func persistBeadhubAccountAndContext(p persistAccountParams) (accountName string, serverName string, err error) {
+	serverName, err = awconfig.DeriveServerNameFromURL(p.BeadhubURL)
 	if err != nil {
 		return "", "", fmt.Errorf("derive server name: %w", err)
 	}
-	accountName = deriveAccountName(serverName, projectSlug, alias)
+	accountName = deriveAccountName(serverName, p.ProjectSlug, p.Alias)
 
 	if err := awconfig.UpdateGlobal(func(cfg *awconfig.GlobalConfig) error {
 		if cfg.Servers == nil {
@@ -24,13 +36,17 @@ func persistBeadhubAccountAndContext(beadhubURL, projectSlug, alias, apiKey, age
 		if cfg.Accounts == nil {
 			cfg.Accounts = map[string]awconfig.Account{}
 		}
-		cfg.Servers[serverName] = awconfig.Server{URL: beadhubURL}
+		cfg.Servers[serverName] = awconfig.Server{URL: p.BeadhubURL}
 		cfg.Accounts[accountName] = awconfig.Account{
 			Server:         serverName,
-			APIKey:         apiKey,
-			DefaultProject: projectSlug,
-			AgentID:        agentID,
-			AgentAlias:     alias,
+			APIKey:         p.APIKey,
+			DefaultProject: p.ProjectSlug,
+			AgentID:        p.AgentID,
+			AgentAlias:     p.Alias,
+			NamespaceSlug:  p.NamespaceSlug,
+			DID:            p.DID,
+			Custody:        p.Custody,
+			Lifetime:       p.Lifetime,
 		}
 		if strings.TrimSpace(cfg.DefaultAccount) == "" {
 			cfg.DefaultAccount = accountName
