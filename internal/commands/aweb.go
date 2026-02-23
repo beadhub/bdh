@@ -64,7 +64,15 @@ var awebWhoamiCmd = &cobra.Command{
 			return fmt.Errorf("whoami takes no arguments")
 		}
 
-		client, err := newAwebClientRequired("")
+		sel, err := resolveBeadhubAuth("")
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(sel.APIKey) == "" {
+			return fmt.Errorf("missing beadhub API key (configure ~/.config/aw/config.yaml + .aw/context, or set BEADHUB_API_KEY)")
+		}
+
+		client, err := aweb.NewWithAPIKey(sel.BaseURL, sel.APIKey)
 		if err != nil {
 			return err
 		}
@@ -78,23 +86,43 @@ var awebWhoamiCmd = &cobra.Command{
 		}
 
 		if awebWhoamiJSON {
-			fmt.Print(marshalJSONOrFallback(resp))
+			combined := struct {
+				*aweb.IntrospectResponse
+				DID      string `json:"did,omitempty"`
+				Custody  string `json:"custody,omitempty"`
+				Lifetime string `json:"lifetime,omitempty"`
+			}{
+				IntrospectResponse: resp,
+				DID:                sel.DID,
+				Custody:            sel.Custody,
+				Lifetime:           sel.Lifetime,
+			}
+			fmt.Print(marshalJSONOrFallback(combined))
 			fmt.Print("\n")
 			return nil
 		}
 
-		fmt.Printf("Project: %s\n", resp.ProjectID)
+		fmt.Printf("Project:  %s\n", resp.ProjectID)
 		if resp.AgentID != "" {
-			fmt.Printf("Agent:   %s\n", resp.AgentID)
+			fmt.Printf("Agent:    %s\n", resp.AgentID)
 		}
 		if resp.Alias != "" {
-			fmt.Printf("Alias:   %s\n", resp.Alias)
+			fmt.Printf("Alias:    %s\n", resp.Alias)
 		}
 		if resp.HumanName != "" {
-			fmt.Printf("Human:   %s\n", resp.HumanName)
+			fmt.Printf("Human:    %s\n", resp.HumanName)
 		}
 		if resp.AgentType != "" {
-			fmt.Printf("Type:    %s\n", resp.AgentType)
+			fmt.Printf("Type:     %s\n", resp.AgentType)
+		}
+		if sel.DID != "" {
+			fmt.Printf("DID:      %s\n", sel.DID)
+		}
+		if sel.Custody != "" {
+			fmt.Printf("Custody:  %s\n", sel.Custody)
+		}
+		if sel.Lifetime != "" {
+			fmt.Printf("Lifetime: %s\n", sel.Lifetime)
 		}
 		return nil
 	},
