@@ -279,13 +279,12 @@ default_account: acct-app.beadhub.ai__beadhub__noah
 		t.Fatalf("apiKey=%q", sel.APIKey)
 	}
 
-	// Context should be repaired to match .beadhub identity.
+	// Context should be repaired enough for future server-scoped resolution:
+	// ensure server_accounts points at the workspace's account without clobbering
+	// the directory's default_account (which may be used by other clients).
 	ctx, err := awconfig.LoadWorktreeContextFrom(filepath.Join(tmp, ".aw", "context"))
 	if err != nil {
 		t.Fatalf("LoadWorktreeContextFrom: %v", err)
-	}
-	if ctx.DefaultAccount != "acct-app.beadhub.ai__beadhub__olivia" {
-		t.Fatalf("context default_account=%q", ctx.DefaultAccount)
 	}
 	if ctx.ServerAccounts["app.beadhub.ai"] != "acct-app.beadhub.ai__beadhub__olivia" {
 		t.Fatalf("context server_accounts[app.beadhub.ai]=%q", ctx.ServerAccounts["app.beadhub.ai"])

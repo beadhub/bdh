@@ -159,7 +159,11 @@ func ensureWorktreeContext(rootDir, serverName, accountName string) error {
 		ctx.ServerAccounts = map[string]string{}
 	}
 	changed := false
-	if strings.TrimSpace(ctx.DefaultAccount) != accountName {
+	// Avoid clobbering the directory's existing default_account, which may be used
+	// by other clients (e.g. `aw`) to default to a different server. For BeadHub,
+	// the authoritative identity comes from .beadhub and we select the account
+	// explicitly, so we only need to ensure the per-server mapping exists.
+	if strings.TrimSpace(ctx.DefaultAccount) == "" {
 		ctx.DefaultAccount = accountName
 		changed = true
 	}
