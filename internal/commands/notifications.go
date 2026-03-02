@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -135,7 +136,9 @@ func FetchNotifications(cfg *config.Config) *NotificationContext {
 	return ctx
 }
 
-// detectGoneWorkspaces checks for workspaces on this hostname whose paths no longer exist.
+// detectGoneWorkspaces checks for workspaces on this hostname whose paths no
+// longer exist, and cleans up stale duplicates when multiple workspace records
+// point to the same directory (only the one matching the .beadhub file is kept).
 func detectGoneWorkspaces(cfg *config.Config, c *client.Client) []GoneWorkspace {
 	hostname, err := os.Hostname()
 	if err != nil || hostname == "" {
@@ -155,23 +158,78 @@ func detectGoneWorkspaces(cfg *config.Config, c *client.Client) []GoneWorkspace 
 	}
 
 	var gone []GoneWorkspace
+	deleted := make(map[string]struct{}) // Track deleted workspace IDs.
+
+	deleteWorkspace := func(id, alias, path string) {
+		if _, ok := deleted[id]; ok {
+			return
+		}
+		deleteCtx, deleteCancel := context.WithTimeout(context.Background(), apiTimeout)
+		_, deleteErr := c.DeleteWorkspace(deleteCtx, id)
+		deleteCancel()
+		if deleteErr == nil {
+			deleted[id] = struct{}{}
+			gone = append(gone, GoneWorkspace{
+				WorkspaceID:   id,
+				Alias:         alias,
+				WorkspacePath: path,
+			})
+		}
+	}
+
+	// Group workspaces by path to detect duplicates.
+	type wsEntry struct {
+		WorkspaceID string
+		Alias       string
+	}
+	byPath := make(map[string][]wsEntry)
+
 	for _, ws := range resp.Workspaces {
 		if ws.WorkspacePath == "" || ws.WorkspaceID == cfg.WorkspaceID {
 			continue
 		}
 		if _, err := os.Stat(ws.WorkspacePath); os.IsNotExist(err) {
-			deleteCtx, deleteCancel := context.WithTimeout(context.Background(), apiTimeout)
-			_, deleteErr := c.DeleteWorkspace(deleteCtx, ws.WorkspaceID)
-			deleteCancel()
-			if deleteErr == nil {
-				gone = append(gone, GoneWorkspace{
-					WorkspaceID:   ws.WorkspaceID,
-					Alias:         ws.Alias,
-					WorkspacePath: ws.WorkspacePath,
-				})
+			// Directory gone — delete the workspace record.
+			deleteWorkspace(ws.WorkspaceID, ws.Alias, ws.WorkspacePath)
+		} else {
+			byPath[ws.WorkspacePath] = append(byPath[ws.WorkspacePath], wsEntry{
+				WorkspaceID: ws.WorkspaceID,
+				Alias:       ws.Alias,
+			})
+		}
+	}
+
+	// For paths with multiple workspace records, keep only the one matching
+	// the .beadhub file and delete the rest.
+	for path, entries := range byPath {
+		if len(entries) <= 1 {
+			continue
+		}
+		beadhubFile := filepath.Join(path, config.FileName)
+		localCfg, err := config.LoadFrom(beadhubFile)
+		if err != nil {
+			continue // Can't read .beadhub — leave all records alone.
+		}
+		for _, entry := range entries {
+			if entry.WorkspaceID == localCfg.WorkspaceID {
+				continue // This is the current one — keep it.
+			}
+			deleteWorkspace(entry.WorkspaceID, entry.Alias, path)
+		}
+	}
+
+	// Also check the current workspace's own directory for stale duplicates.
+	// The main loop skips cfg.WorkspaceID, so other workspace records pointing
+	// to this same directory end up in byPath but may not trigger the
+	// len > 1 check (if there's only one stale record, len == 1).
+	if ownPath, err := config.WorkspaceRoot(); err == nil {
+		if entries, ok := byPath[ownPath]; ok {
+			for _, entry := range entries {
+				deleteWorkspace(entry.WorkspaceID, entry.Alias, ownPath)
 			}
 		}
 	}
+
 	return gone
 }
 
