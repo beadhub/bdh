@@ -642,6 +642,144 @@ func TestPassthrough_ErrorsWhenNoConfigAndNoBeads(t *testing.T) {
 	}
 }
 
+// --- Bug fix tests ---
+
+func TestPositionalArg_BooleanFlagBeforeRef(t *testing.T) {
+	// MAJ-4: Boolean flags like --json don't take values. positionalArg should
+	// not consume the next argument as a flag value.
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--json", "bdh-001"}, "bdh-001"},
+		{[]string{"bdh-001", "--json"}, "bdh-001"},
+		{[]string{"--json"}, ""},
+		{[]string{"--verbose", "bdh-001"}, "bdh-001"},
+		// Flag with value should still skip the value
+		{[]string{"--status", "open", "bdh-001"}, "bdh-001"},
+		{[]string{"--status=open", "bdh-001"}, "bdh-001"},
+	}
+	for _, tt := range tests {
+		got := positionalArg(tt.args)
+		if got != tt.want {
+			t.Errorf("positionalArg(%v) = %q, want %q", tt.args, got, tt.want)
+		}
+	}
+}
+
+func TestAllPositionalArgs_BooleanFlags(t *testing.T) {
+	// Same bug as positionalArg: boolean flags should not consume next arg
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"--json", "bdh-001", "bdh-002"}, []string{"bdh-001", "bdh-002"}},
+		{[]string{"bdh-001", "--reason", "done", "bdh-002"}, []string{"bdh-001", "bdh-002"}},
+	}
+	for _, tt := range tests {
+		got := allPositionalArgs(tt.args)
+		if len(got) != len(tt.want) {
+			t.Errorf("allPositionalArgs(%v) = %v, want %v", tt.args, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("allPositionalArgs(%v)[%d] = %q, want %q", tt.args, i, got[i], tt.want[i])
+			}
+		}
+	}
+}
+
+func TestNativeClose_AllFail_ExitCode(t *testing.T) {
+	// MAJ-3: When all close operations fail, exit code should be non-zero
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"detail": "not found"})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"close", "bdh-999"})
+	if err != nil {
+		t.Fatalf("runNative close: %v", err)
+	}
+	if result.ExitCode == 0 {
+		t.Errorf("exit code = 0, want non-zero when close fails; stdout: %s", result.Stdout)
+	}
+}
+
+func TestNativeReopen_HeldError(t *testing.T) {
+	// SUG-4: nativeReopen should handle TaskHeldError with a specific message
+	// like nativeUpdate does, not a generic "reopening task" wrapper.
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{
+				"detail":            "task is held by another agent",
+				"holder_agent_id":   "agent-abc",
+				"assignee_agent_id": "agent-abc",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"reopen", "bdh-001"})
+	if err != nil {
+		t.Fatalf("runNative reopen: %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Errorf("exit code = %d, want 1", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "held by another agent") {
+		t.Errorf("stderr = %q, want specific held-by-another-agent message", result.Stderr)
+	}
+}
+
+func TestNativeSync_Message(t *testing.T) {
+	// SUG-3: sync in native mode should output an explanatory message
+	_, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	result, err := runNative(client, []string{"sync"})
+	if err != nil {
+		t.Fatalf("runNative sync: %v", err)
+	}
+	if result.Stdout == "" {
+		t.Errorf("sync should produce an explanatory message, got empty output")
+	}
+}
+
+func TestParseNativeCommand_ErrorMessageSuggestsBdhInit(t *testing.T) {
+	// SUG-2: Error for unsupported commands should suggest 'bdh :init', not 'bd init'
+	_, _, err := parseNativeCommand([]string{"search", "foo"})
+	if err == nil {
+		t.Fatal("expected error for unsupported command")
+	}
+	if strings.Contains(err.Error(), "'bd init'") {
+		t.Errorf("error should not suggest 'bd init', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "bdh :init") {
+		t.Errorf("error should suggest 'bdh :init', got: %v", err)
+	}
+}
+
+func TestFormatTaskLine_LeadingIconMatchesPriority(t *testing.T) {
+	// MAJ-5: Leading icon should reflect priority, not always be a circle
+	highPri := formatTaskLine(aweb.TaskSummary{TaskRef: "bdh-001", Priority: 1, TaskType: "task", Title: "High"})
+	if !strings.HasPrefix(highPri, "●") {
+		t.Errorf("P1 task should start with filled circle, got: %q", highPri)
+	}
+
+	lowPri := formatTaskLine(aweb.TaskSummary{TaskRef: "bdh-002", Priority: 4, TaskType: "task", Title: "Low"})
+	if !strings.HasPrefix(lowPri, "○") {
+		t.Errorf("P4 task should start with open circle, got: %q", lowPri)
+	}
+}
+
 func TestPassthrough_NativeModeUnsupportedCommand(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()

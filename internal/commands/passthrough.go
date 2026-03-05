@@ -488,11 +488,13 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 			}
 		}
 	} else {
-		// Native mode: use aweb /v1/tasks API (bd not initialized)
-		if aw == nil {
-			return nil, fmt.Errorf("native mode requires aweb client — run 'bdh :init' first")
+		// Native mode: use aweb /v1/tasks API (bd not initialized).
+		// Require an authenticated client — tasks are project-scoped via API key.
+		nativeAw, nativeErr := newAwebClientRequired(cfg.BeadhubURL)
+		if nativeErr != nil {
+			return nil, fmt.Errorf("native mode requires authentication — %w", nativeErr)
 		}
-		nativeResult, err := runNative(aw, cleanArgs)
+		nativeResult, err := runNative(nativeAw, cleanArgs)
 		if err != nil {
 			return nil, fmt.Errorf("native mode: %w", err)
 		}

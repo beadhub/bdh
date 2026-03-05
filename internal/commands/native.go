@@ -48,7 +48,7 @@ func parseNativeCommand(args []string) (cmd string, remaining []string, err erro
 	}
 
 	if !isNativeCommand(cmd) {
-		return "", nil, fmt.Errorf("command %q is not available in native mode (bd is not initialized — run 'bd init' or use a supported command)", cmd)
+		return "", nil, fmt.Errorf("command %q is not available in native mode (bd is not initialized — run 'bdh :init' or use a supported command)", cmd)
 	}
 
 	remaining = args[idx+1:]
@@ -87,7 +87,7 @@ func runNative(aw *aweb.Client, args []string) (*bd.Result, error) {
 	case "dep":
 		output, err = nativeDep(ctx, aw, remaining)
 	case "sync":
-		output = "" // no-op in native mode
+		output = "Native mode: tasks are stored server-side, no local sync needed.\n"
 	case "stats":
 		output, err = nativeStats(ctx, aw)
 	case "reopen":
@@ -135,13 +135,22 @@ func hasFlag(args []string, flag string) bool {
 	return false
 }
 
+// knownValueFlags lists flags that take a subsequent value argument.
+// Boolean flags (--json, --verbose, etc.) are NOT listed here.
+var knownValueFlags = map[string]bool{
+	"--title": true, "--description": true, "--notes": true, "--design": true,
+	"--type": true, "--priority": true, "--status": true, "--assignee": true,
+	"--labels": true, "--reason": true, "--limit": true,
+	"--db": true, "--actor": true, "--lock-timeout": true,
+}
+
 // positionalArg returns the first non-flag argument (the ref/id).
 func positionalArg(args []string) string {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
-			// Skip flag and its value if it takes one
-			if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			// Skip flag value only for known value-taking flags
+			if !strings.Contains(arg, "=") && knownValueFlags[arg] && i+1 < len(args) {
 				i++
 			}
 			continue
@@ -157,7 +166,7 @@ func allPositionalArgs(args []string) []string {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
-			if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if !strings.Contains(arg, "=") && knownValueFlags[arg] && i+1 < len(args) {
 				i++
 			}
 			continue
@@ -177,16 +186,18 @@ func priorityIcon(p int) string {
 }
 
 func formatTaskLine(t aweb.TaskSummary) string {
-	return fmt.Sprintf("○ %s [%s P%d] [%s] - %s",
-		t.TaskRef, priorityIcon(t.Priority), t.Priority, t.TaskType, t.Title)
+	icon := priorityIcon(t.Priority)
+	return fmt.Sprintf("%s %s [%s P%d] [%s] - %s",
+		icon, t.TaskRef, icon, t.Priority, t.TaskType, t.Title)
 }
 
 func formatTaskDetail(t *aweb.Task) string {
 	var sb strings.Builder
 
+	icon := priorityIcon(t.Priority)
 	statusLabel := strings.ToUpper(t.Status)
-	sb.WriteString(fmt.Sprintf("○ %s · %s   [%s P%d · %s]\n",
-		t.TaskRef, t.Title, priorityIcon(t.Priority), t.Priority, statusLabel))
+	sb.WriteString(fmt.Sprintf("%s %s · %s   [%s P%d · %s]\n",
+		icon, t.TaskRef, t.Title, icon, t.Priority, statusLabel))
 	sb.WriteString(fmt.Sprintf("Type: %s\n", t.TaskType))
 	sb.WriteString(fmt.Sprintf("Created: %s · Updated: %s\n", formatDate(t.CreatedAt), formatDate(t.UpdatedAt)))
 
@@ -377,6 +388,7 @@ func nativeClose(ctx context.Context, aw *aweb.Client, args []string) (string, e
 	reason := parseFlagValue(args, "--reason")
 
 	var sb strings.Builder
+	var failures int
 	for _, ref := range refs {
 		status := "closed"
 		req := &aweb.TaskUpdateRequest{Status: &status}
@@ -387,6 +399,7 @@ func nativeClose(ctx context.Context, aw *aweb.Client, args []string) (string, e
 		resp, err := aw.TaskUpdate(ctx, ref, req)
 		if err != nil {
 			sb.WriteString(fmt.Sprintf("✗ Failed to close %s: %v\n", ref, err))
+			failures++
 			continue
 		}
 
@@ -396,6 +409,11 @@ func nativeClose(ctx context.Context, aw *aweb.Client, args []string) (string, e
 				sb.WriteString(fmt.Sprintf("  ✓ Auto-closed %s: %s\n", t.TaskRef, t.Title))
 			}
 		}
+	}
+
+	if failures > 0 && failures == len(refs) {
+		// All closes failed — report as error
+		return "", fmt.Errorf("%s", strings.TrimSpace(sb.String()))
 	}
 	return sb.String(), nil
 }
@@ -429,6 +447,7 @@ func nativeBlocked(ctx context.Context, aw *aweb.Client) (string, error) {
 	// For each open task, check if it has open blockers
 	var blocked []string
 	var truncated bool
+	var checked int
 	for _, t := range resp.Tasks {
 		task, err := aw.TaskGet(ctx, t.TaskRef)
 		if err != nil {
@@ -438,6 +457,7 @@ func nativeBlocked(ctx context.Context, aw *aweb.Client) (string, error) {
 			}
 			continue
 		}
+		checked++
 		var openBlockers []string
 		for _, dep := range task.BlockedBy {
 			if dep.Status != "closed" {
@@ -445,8 +465,9 @@ func nativeBlocked(ctx context.Context, aw *aweb.Client) (string, error) {
 			}
 		}
 		if len(openBlockers) > 0 {
-			blocked = append(blocked, fmt.Sprintf("○ %s [%s P%d] [%s] - %s (blocked by: %s)",
-				t.TaskRef, priorityIcon(t.Priority), t.Priority, t.TaskType, t.Title,
+			icon := priorityIcon(t.Priority)
+			blocked = append(blocked, fmt.Sprintf("%s %s [%s P%d] [%s] - %s (blocked by: %s)",
+				icon, t.TaskRef, icon, t.Priority, t.TaskType, t.Title,
 				strings.Join(openBlockers, ", ")))
 		}
 	}
@@ -456,14 +477,14 @@ func nativeBlocked(ctx context.Context, aw *aweb.Client) (string, error) {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("🚫 Blocked tasks (%d):\n\n", len(blocked)))
+	sb.WriteString(fmt.Sprintf("Blocked tasks (%d):\n\n", len(blocked)))
 	for _, line := range blocked {
 		sb.WriteString(line)
 		sb.WriteString("\n")
 	}
 	if truncated {
 		sb.WriteString(fmt.Sprintf("\nWarning: results truncated (checked %d of %d tasks before timeout)\n",
-			len(blocked), len(resp.Tasks)))
+			checked, len(resp.Tasks)))
 	}
 	return sb.String(), nil
 }
@@ -539,6 +560,10 @@ func nativeReopen(ctx context.Context, aw *aweb.Client, args []string) (string, 
 	status := "open"
 	resp, err := aw.TaskUpdate(ctx, ref, &aweb.TaskUpdateRequest{Status: &status})
 	if err != nil {
+		var held *aweb.TaskHeldError
+		if errors.As(err, &held) {
+			return "", fmt.Errorf("task %s is held by another agent: %s", ref, held.Detail)
+		}
 		return "", fmt.Errorf("reopening task %s: %w", ref, err)
 	}
 
