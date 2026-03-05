@@ -111,6 +111,9 @@ func TestIsMutationCommand(t *testing.T) {
 		{[]string{"dep", "list", "bd-42"}, true},
 		{[]string{"dep", "tree", "bd-42"}, true},
 		{[]string{"dep", "cycles"}, true},
+		// comment command
+		{[]string{"comment", "add", "bd-42", "hello"}, true},
+		{[]string{"comment", "list", "bd-42"}, true},
 		{[]string{"list"}, false},
 		{[]string{"show", "bd-42"}, false},
 		{[]string{"ready"}, false},

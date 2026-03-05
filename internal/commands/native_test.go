@@ -28,6 +28,7 @@ func TestParseNativeCommand(t *testing.T) {
 		{name: "ready command", args: []string{"ready"}, wantCmd: "ready"},
 		{name: "blocked command", args: []string{"blocked"}, wantCmd: "blocked"},
 		{name: "dep command", args: []string{"dep", "add", "bdh-42", "bdh-43"}, wantCmd: "dep"},
+		{name: "comment command", args: []string{"comment", "add", "bdh-42", "hello"}, wantCmd: "comment"},
 		{name: "sync command", args: []string{"sync"}, wantCmd: "sync"},
 		{name: "stats command", args: []string{"stats"}, wantCmd: "stats"},
 		{name: "reopen command", args: []string{"reopen", "bdh-42"}, wantCmd: "reopen"},
@@ -105,7 +106,7 @@ func TestParseNativeCommand_WithGlobalFlags(t *testing.T) {
 }
 
 func TestNativeCommandsAreListed(t *testing.T) {
-	supported := []string{"create", "list", "show", "update", "close", "ready", "blocked", "dep", "sync", "stats", "reopen"}
+	supported := []string{"create", "list", "show", "update", "close", "ready", "blocked", "dep", "comment", "sync", "stats", "reopen"}
 	for _, cmd := range supported {
 		if !isNativeCommand(cmd) {
 			t.Errorf("isNativeCommand(%q) = false, want true", cmd)
@@ -781,6 +782,616 @@ func TestFormatTaskLine_LeadingIconMatchesPriority(t *testing.T) {
 	lowPri := formatTaskLine(aweb.TaskSummary{TaskRef: "bdh-002", Priority: 4, TaskType: "task", Title: "Low"})
 	if !strings.HasPrefix(lowPri, "○") {
 		t.Errorf("P4 task should start with open circle, got: %q", lowPri)
+	}
+}
+
+// --- JSON output tests ---
+
+func TestNativeList_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks" && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.TaskListResponse{
+				Tasks: []aweb.TaskSummary{
+					{TaskRef: "bdh-001", Title: "First", Priority: 1, TaskType: "task", Status: "open"},
+					{TaskRef: "bdh-002", Title: "Second", Priority: 2, TaskType: "bug", Status: "open"},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"list", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var resp aweb.TaskListResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if len(resp.Tasks) != 2 {
+		t.Errorf("got %d tasks, want 2", len(resp.Tasks))
+	}
+	if resp.Tasks[0].TaskRef != "bdh-001" {
+		t.Errorf("task[0].TaskRef = %q, want bdh-001", resp.Tasks[0].TaskRef)
+	}
+}
+
+func TestNativeShow_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks/bdh-001" && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.Task{
+				TaskRef:     "bdh-001",
+				Title:       "Test task",
+				Description: "A description",
+				Status:      "open",
+				Priority:    2,
+				TaskType:    "feature",
+				CreatedAt:   "2026-03-05T10:00:00Z",
+				UpdatedAt:   "2026-03-05T10:00:00Z",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"show", "bdh-001", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var task aweb.Task
+	if err := json.Unmarshal([]byte(result.Stdout), &task); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if task.TaskRef != "bdh-001" {
+		t.Errorf("task_ref = %q, want bdh-001", task.TaskRef)
+	}
+	if task.Title != "Test task" {
+		t.Errorf("title = %q, want 'Test task'", task.Title)
+	}
+}
+
+func TestNativeCreate_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks" && r.Method == "POST" {
+			json.NewEncoder(w).Encode(aweb.Task{
+				TaskRef:  "bdh-042",
+				Title:    "New task",
+				TaskType: "task",
+				Status:   "open",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"create", "--title", "New task", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var task aweb.Task
+	if err := json.Unmarshal([]byte(result.Stdout), &task); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if task.TaskRef != "bdh-042" {
+		t.Errorf("task_ref = %q, want bdh-042", task.TaskRef)
+	}
+}
+
+func TestNativeReady_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks/ready" && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.TaskListResponse{
+				Tasks: []aweb.TaskSummary{
+					{TaskRef: "bdh-010", Title: "Ready task", Priority: 1, TaskType: "task"},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"ready", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var resp aweb.TaskListResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if len(resp.Tasks) != 1 || resp.Tasks[0].TaskRef != "bdh-010" {
+		t.Errorf("unexpected tasks: %+v", resp.Tasks)
+	}
+}
+
+func TestNativeUpdate_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Method == "PATCH" {
+			json.NewEncoder(w).Encode(aweb.TaskUpdateResponse{
+				Task: aweb.Task{TaskRef: "bdh-001", Title: "Updated", Status: "in_progress"},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"update", "bdh-001", "--status", "in_progress", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var resp aweb.TaskUpdateResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if resp.TaskRef != "bdh-001" {
+		t.Errorf("task_ref = %q, want bdh-001", resp.TaskRef)
+	}
+}
+
+func TestNativeClose_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Method == "PATCH" {
+			ref := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+			json.NewEncoder(w).Encode(aweb.TaskUpdateResponse{
+				Task: aweb.Task{TaskRef: ref, Title: "Task " + ref, Status: "closed"},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"close", "bdh-001", "bdh-002", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var results []aweb.TaskUpdateResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &results); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if len(results) != 2 {
+		t.Errorf("got %d results, want 2", len(results))
+	}
+}
+
+func TestNativeBlocked_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks/blocked" && r.Method == "GET" {
+			json.NewEncoder(w).Encode(blockedTasksResponse{
+				Tasks: []blockedTaskEntry{
+					{
+						TaskRef: "bdh-001", Title: "Blocked", Priority: 1, TaskType: "task", Status: "open",
+						BlockedBy: []aweb.TaskDepView{{TaskRef: "bdh-000", Title: "Blocker", Status: "open"}},
+					},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	auth := &nativeAuth{baseURL: server.URL, apiKey: "test-key"}
+	result, err := runNativeWithAuth(client, []string{"blocked", "--json"}, auth)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var resp blockedTasksResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if len(resp.Tasks) != 1 {
+		t.Errorf("got %d tasks, want 1", len(resp.Tasks))
+	}
+}
+
+func TestNativeStats_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks" && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.TaskListResponse{
+				Tasks: []aweb.TaskSummary{
+					{TaskRef: "bdh-001", Status: "open"},
+					{TaskRef: "bdh-002", Status: "open"},
+					{TaskRef: "bdh-003", Status: "in_progress"},
+					{TaskRef: "bdh-004", Status: "closed"},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"stats", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var stats map[string]int
+	if err := json.Unmarshal([]byte(result.Stdout), &stats); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if stats["total"] != 4 {
+		t.Errorf("total = %d, want 4", stats["total"])
+	}
+	if stats["open"] != 2 {
+		t.Errorf("open = %d, want 2", stats["open"])
+	}
+}
+
+func TestNativeReopen_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Method == "PATCH" {
+			ref := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+			json.NewEncoder(w).Encode(aweb.TaskUpdateResponse{
+				Task: aweb.Task{TaskRef: ref, Title: "Reopened", Status: "open"},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"reopen", "bdh-001", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var resp aweb.TaskUpdateResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if resp.TaskRef != "bdh-001" {
+		t.Errorf("task_ref = %q, want bdh-001", resp.TaskRef)
+	}
+}
+
+func TestNativeList_JSON_Empty(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks" && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.TaskListResponse{Tasks: []aweb.TaskSummary{}})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"list", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	// Even with no tasks, JSON mode should return valid JSON (not "No tasks found")
+	var resp aweb.TaskListResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if len(resp.Tasks) != 0 {
+		t.Errorf("got %d tasks, want 0", len(resp.Tasks))
+	}
+}
+
+// --- Labels filter test ---
+
+func TestNativeList_LabelsFilter(t *testing.T) {
+	var gotLabels string
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks" && r.Method == "GET" {
+			gotLabels = r.URL.Query().Get("labels")
+			json.NewEncoder(w).Encode(aweb.TaskListResponse{
+				Tasks: []aweb.TaskSummary{
+					{TaskRef: "bdh-001", Title: "Labeled task", Priority: 2, TaskType: "task", Status: "open",
+						Labels: []string{"frontend", "urgent"}},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"list", "--labels", "frontend,urgent"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if gotLabels != "frontend,urgent" {
+		t.Errorf("labels query param = %q, want 'frontend,urgent'", gotLabels)
+	}
+	if !strings.Contains(result.Stdout, "bdh-001") {
+		t.Errorf("stdout missing bdh-001")
+	}
+}
+
+// --- Dep list tests ---
+
+func TestNativeDep_List(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks/bdh-001" && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.Task{
+				TaskRef:  "bdh-001",
+				Title:    "My task",
+				Status:   "open",
+				Priority: 2,
+				TaskType: "task",
+				BlockedBy: []aweb.TaskDepView{
+					{TaskRef: "bdh-000", Title: "Prerequisite", Status: "open"},
+				},
+				Blocks: []aweb.TaskDepView{
+					{TaskRef: "bdh-002", Title: "Downstream", Status: "open"},
+				},
+				CreatedAt: "2026-03-05T10:00:00Z",
+				UpdatedAt: "2026-03-05T10:00:00Z",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"dep", "list", "bdh-001"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "bdh-000") {
+		t.Errorf("stdout missing blocker bdh-000")
+	}
+	if !strings.Contains(result.Stdout, "bdh-002") {
+		t.Errorf("stdout missing downstream bdh-002")
+	}
+}
+
+func TestNativeDep_List_NoDeps(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks/bdh-001" && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.Task{
+				TaskRef: "bdh-001", Title: "No deps", Status: "open",
+				Priority: 2, TaskType: "task",
+				CreatedAt: "2026-03-05T10:00:00Z", UpdatedAt: "2026-03-05T10:00:00Z",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"dep", "list", "bdh-001"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if !strings.Contains(result.Stdout, "No dependencies") {
+		t.Errorf("stdout = %q, want 'No dependencies'", result.Stdout)
+	}
+}
+
+func TestNativeDep_List_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks/bdh-001" && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.Task{
+				TaskRef: "bdh-001", Title: "My task", Status: "open",
+				Priority: 2, TaskType: "task",
+				BlockedBy: []aweb.TaskDepView{{TaskRef: "bdh-000", Title: "Blocker", Status: "open"}},
+				CreatedAt: "2026-03-05T10:00:00Z", UpdatedAt: "2026-03-05T10:00:00Z",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"dep", "list", "bdh-001", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var data map[string][]aweb.TaskDepView
+	if err := json.Unmarshal([]byte(result.Stdout), &data); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if len(data["blocked_by"]) != 1 {
+		t.Errorf("blocked_by count = %d, want 1", len(data["blocked_by"]))
+	}
+}
+
+// --- Comment command tests ---
+
+func TestNativeComment_Add(t *testing.T) {
+	var gotRef, gotBody string
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/comments") && r.Method == "POST" {
+			gotRef = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/tasks/"), "/comments")
+			var req map[string]string
+			json.NewDecoder(r.Body).Decode(&req)
+			gotBody = req["body"]
+			json.NewEncoder(w).Encode(aweb.TaskComment{
+				CommentID: "comment-001",
+				TaskID:    "task-id",
+				Body:      gotBody,
+				CreatedAt: "2026-03-05T10:00:00Z",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"comment", "add", "bdh-001", "This is a comment"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if gotRef != "bdh-001" {
+		t.Errorf("ref = %q, want bdh-001", gotRef)
+	}
+	if gotBody != "This is a comment" {
+		t.Errorf("body = %q, want 'This is a comment'", gotBody)
+	}
+	if !strings.Contains(result.Stdout, "comment") {
+		t.Errorf("stdout = %q, want confirmation", result.Stdout)
+	}
+}
+
+func TestNativeComment_List(t *testing.T) {
+	author := "agent-abc"
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/comments") && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.TaskCommentListResponse{
+				Comments: []aweb.TaskComment{
+					{CommentID: "c1", Body: "First comment", AuthorAgentID: &author, CreatedAt: "2026-03-05T10:00:00Z"},
+					{CommentID: "c2", Body: "Second comment", CreatedAt: "2026-03-05T11:00:00Z"},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"comment", "list", "bdh-001"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "First comment") {
+		t.Errorf("stdout missing 'First comment'")
+	}
+	if !strings.Contains(result.Stdout, "Second comment") {
+		t.Errorf("stdout missing 'Second comment'")
+	}
+}
+
+func TestNativeComment_List_Empty(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/comments") && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.TaskCommentListResponse{Comments: []aweb.TaskComment{}})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"comment", "list", "bdh-001"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if !strings.Contains(result.Stdout, "No comments") {
+		t.Errorf("stdout = %q, want 'No comments'", result.Stdout)
+	}
+}
+
+func TestNativeComment_List_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/comments") && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.TaskCommentListResponse{
+				Comments: []aweb.TaskComment{
+					{CommentID: "c1", Body: "A comment", CreatedAt: "2026-03-05T10:00:00Z"},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"comment", "list", "bdh-001", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var resp aweb.TaskCommentListResponse
+	if err := json.Unmarshal([]byte(result.Stdout), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if len(resp.Comments) != 1 {
+		t.Errorf("got %d comments, want 1", len(resp.Comments))
+	}
+}
+
+func TestNativeComment_Add_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/comments") && r.Method == "POST" {
+			json.NewEncoder(w).Encode(aweb.TaskComment{
+				CommentID: "comment-001",
+				Body:      "My comment",
+				CreatedAt: "2026-03-05T10:00:00Z",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"comment", "add", "bdh-001", "My comment", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var comment aweb.TaskComment
+	if err := json.Unmarshal([]byte(result.Stdout), &comment); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if comment.CommentID != "comment-001" {
+		t.Errorf("comment_id = %q, want comment-001", comment.CommentID)
 	}
 }
 

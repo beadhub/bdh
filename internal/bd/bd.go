@@ -117,10 +117,8 @@ func IsMutationCommand(args []string) bool {
 	switch CommandFromArgs(args) {
 	case "create", "close", "update", "delete", "reopen":
 		return true
-	case "dep":
-		// All dep commands trigger sync to be conservative.
-		// Mutation subcommands (add/remove/relate/unrelate) need sync.
-		// Read-only subcommands (list/tree/cycles) get synced but have no changes.
+	case "dep", "comment":
+		// All dep/comment commands trigger sync to be conservative.
 		return true
 	case "sync":
 		// `bd sync` updates the canonical JSONL export and may commit it; ensure
