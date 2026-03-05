@@ -221,18 +221,24 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 				return nil, fmt.Errorf("--:jump-in requires a configured workspace - run 'bdh :init' first")
 			}
 
-			result.Warning = "No .beadhub config found - running without coordination"
+			if beads.IsInitialized() {
+				// bd mode without coordination
+				result.Warning = "No .beadhub config found - running without coordination"
 
-			runner := bd.New()
-			bdResult, runErr := runner.Run(context.Background(), cleanArgs)
-			if runErr != nil {
-				return nil, fmt.Errorf("running bd: %w", runErr)
+				runner := bd.New()
+				bdResult, runErr := runner.Run(context.Background(), cleanArgs)
+				if runErr != nil {
+					return nil, fmt.Errorf("running bd: %w", runErr)
+				}
+
+				result.Stdout = bdResult.Stdout
+				result.Stderr = bdResult.Stderr
+				result.ExitCode = bdResult.ExitCode
+				return result, nil
 			}
 
-			result.Stdout = bdResult.Stdout
-			result.Stderr = bdResult.Stderr
-			result.ExitCode = bdResult.ExitCode
-			return result, nil
+			// Native mode requires .beadhub for the server URL
+			return nil, fmt.Errorf("no .beadhub config and bd is not initialized — run 'bdh :init' first")
 		}
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
@@ -446,40 +452,51 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 		}
 	}
 
-	// Run bd with cleaned args (without --:jump-in)
-	runner := bd.New()
-	bdResult, err := runner.Run(context.Background(), cleanArgs)
-	if err != nil {
-		return nil, fmt.Errorf("running bd: %w", err)
-	}
-
-	result.Stdout = bdResult.Stdout
-	result.Stderr = bdResult.Stderr
-	result.ExitCode = bdResult.ExitCode
-
-	// Sync after mutation commands (non-blocking - just warn on failure)
-	if bd.IsMutationCommand(cleanArgs) && bdResult.ExitCode == 0 {
-		syncResult := syncToBeadHub(cfg, cleanArgs, verbose)
-		if syncResult.Warning != "" {
-			result.SyncWarning = syncResult.Warning
+	if beads.IsInitialized() {
+		// bd mode: pass through to bd binary
+		runner := bd.New()
+		bdResult, err := runner.Run(context.Background(), cleanArgs)
+		if err != nil {
+			return nil, fmt.Errorf("running bd: %w", err)
 		}
-		result.SyncStats = syncResult.Stats
-		result.SyncMode = syncResult.SyncMode
-	}
 
-	// For successful close commands, find related work in progress
-	if isCloseCommandFromArgs(cleanArgs) && bdResult.ExitCode == 0 {
-		closedBeadID := extractBeadIDFromArgs(cleanArgs)
-		if closedBeadID != "" {
-			// Find related work in progress
-			if cmdResp != nil && cmdResp.Context != nil {
-				result.RelatedWork = findRelatedWorkInProgress(
-					closedBeadID,
-					cfg.WorkspaceID,
-					cmdResp.Context.BeadsInProgress,
-				)
+		result.Stdout = bdResult.Stdout
+		result.Stderr = bdResult.Stderr
+		result.ExitCode = bdResult.ExitCode
+
+		// Sync after mutation commands (non-blocking - just warn on failure)
+		if bd.IsMutationCommand(cleanArgs) && bdResult.ExitCode == 0 {
+			syncResult := syncToBeadHub(cfg, cleanArgs, verbose)
+			if syncResult.Warning != "" {
+				result.SyncWarning = syncResult.Warning
+			}
+			result.SyncStats = syncResult.Stats
+			result.SyncMode = syncResult.SyncMode
+		}
+
+		// For successful close commands, find related work in progress
+		if isCloseCommandFromArgs(cleanArgs) && bdResult.ExitCode == 0 {
+			closedBeadID := extractBeadIDFromArgs(cleanArgs)
+			if closedBeadID != "" {
+				if cmdResp != nil && cmdResp.Context != nil {
+					result.RelatedWork = findRelatedWorkInProgress(
+						closedBeadID,
+						cfg.WorkspaceID,
+						cmdResp.Context.BeadsInProgress,
+					)
+				}
 			}
 		}
+	} else {
+		// Native mode: use aweb /v1/tasks API (bd not initialized)
+		nativeResult, err := runNative(cleanArgs)
+		if err != nil {
+			return nil, fmt.Errorf("native mode: %w", err)
+		}
+
+		result.Stdout = nativeResult.Stdout
+		result.Stderr = nativeResult.Stderr
+		result.ExitCode = nativeResult.ExitCode
 	}
 
 	// Send notifications to other agents when --:jump-in is used

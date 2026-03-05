@@ -131,6 +131,29 @@ func TestIsMutationCommand(t *testing.T) {
 	}
 }
 
+func TestCommandIndexFromArgs(t *testing.T) {
+	tests := []struct {
+		args      []string
+		wantCmd   string
+		wantIndex int
+	}{
+		{[]string{"create", "--title", "Test"}, "create", 0},
+		{[]string{"--db", ".beads/beads.db", "create", "--title", "Test"}, "create", 2},
+		{[]string{"--db=.beads/beads.db", "list"}, "list", 1},
+		{[]string{"--actor", "list", "list", "--status=open"}, "list", 2},
+		{[]string{}, "", -1},
+		{[]string{"--db"}, "", -1},
+		{[]string{"--db", "foo"}, "", -1},
+	}
+
+	for _, tt := range tests {
+		cmd, idx := CommandIndexFromArgs(tt.args)
+		if cmd != tt.wantCmd || idx != tt.wantIndex {
+			t.Errorf("CommandIndexFromArgs(%v) = (%q, %d), want (%q, %d)", tt.args, cmd, idx, tt.wantCmd, tt.wantIndex)
+		}
+	}
+}
+
 func TestNew(t *testing.T) {
 	r := New()
 	if r.BdPath != "bd" {

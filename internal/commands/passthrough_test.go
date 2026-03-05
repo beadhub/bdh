@@ -13,9 +13,23 @@ import (
 	"time"
 
 	aweb "github.com/awebai/aw"
+	"github.com/beadhub/bdh/internal/beads"
 	"github.com/beadhub/bdh/internal/client"
 	"github.com/beadhub/bdh/internal/config"
 )
+
+// setupBeadsDir creates a .beads directory with a beads.db file so that
+// beads.IsInitialized() returns true, and resets the beads cache.
+func setupBeadsDir(t *testing.T) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(".", ".beads"), 0755); err != nil {
+		t.Fatalf("setup .beads dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(".beads", "beads.db"), []byte(""), 0644); err != nil {
+		t.Fatalf("setup beads.db: %v", err)
+	}
+	beads.ResetCache()
+}
 
 func TestPassthrough_PreservesArgsWhenInvokingBd(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -27,7 +41,7 @@ func TestPassthrough_PreservesArgsWhenInvokingBd(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	// Stub out `bd` in PATH so we can assert the argv it receives.
 	binDir := filepath.Join(tmpDir, "bin")
@@ -123,7 +137,7 @@ func TestPassthrough_ReadyUsesBoundedTeamQuery(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	binDir := filepath.Join(tmpDir, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
@@ -318,7 +332,7 @@ func TestPassthrough_RunsBdWhenServerUnreachable(t *testing.T) {
 	os.Chdir(tmpDir)
 
 	// Create .beads directory
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	// Create .beadhub config pointing to unreachable server
 	cfg := &config.Config{
@@ -353,7 +367,7 @@ func TestPassthrough_ShowsWarningWhenServerUnreachable(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	cfg := &config.Config{
 		WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
@@ -381,7 +395,7 @@ func TestPassthrough_RunsBdWhenApproved(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	// Mock server that approves
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -430,7 +444,7 @@ func TestPassthrough_RejectsClaimWithError(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	// Mock server that rejects
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -496,7 +510,7 @@ func TestPassthrough_RunsBdWhenServerReturns5xx(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	// Mock server that returns 500
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -541,7 +555,7 @@ func TestPassthrough_EmptyArgsReturnsError(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	cfg := &config.Config{
 		WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
@@ -575,7 +589,7 @@ func TestPassthrough_SyncsAfterMutationCommand(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	// Stub out `bd` in PATH. `bdh` should run `bd export` before syncing so the
 	// JSONL reflects the latest mutations even in daemon mode.
@@ -667,7 +681,7 @@ func TestPassthrough_DoesNotSyncOnBdFailure(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 	os.WriteFile(".beads/issues.jsonl", []byte(`{"id":"bd-1"}`), 0644)
 
 	// Stub out `bd` in PATH so the create command reliably fails.
@@ -737,7 +751,7 @@ func TestPassthrough_SyncFailureWarnsButDoesNotError(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 	os.WriteFile(".beads/issues.jsonl", []byte(`{"id":"bd-1"}`), 0644)
 
 	// Stub out `bd` in PATH (export no-op; create succeeds).
@@ -815,7 +829,7 @@ func TestPassthrough_RequiresBeadhubConfig(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 	// No .beadhub file
 
 	result, err := runPassthrough([]string{"--version"})
@@ -923,7 +937,7 @@ func TestPassthrough_LocalConfigMissingPath(t *testing.T) {
 	// Reset config path after test
 	defer config.SetPath("")
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	// Create default config
 	cfg := &config.Config{
@@ -961,7 +975,7 @@ func TestPassthrough_LocalConfigUsesCustomPath(t *testing.T) {
 	// Reset config path after test
 	defer config.SetPath("")
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	// Create a custom config file in a different location
 	customPath := tmpDir + "/.beadhub-dev"
@@ -1090,7 +1104,7 @@ func TestPassthrough_JumpInOverridesRejection(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 	os.WriteFile(".beads/issues.jsonl", []byte(`{"id":"bd-42","title":"Test","status":"open"}`), 0644)
 
 	var messageSent bool
@@ -1186,7 +1200,7 @@ func TestPassthrough_JumpInRequiresMessage(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	cfg := &config.Config{
 		WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
@@ -1217,7 +1231,7 @@ func TestPassthrough_JumpInWarnsWhenBeadIDNotExtracted(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/bdh/command" {
@@ -1267,7 +1281,7 @@ func TestPassthrough_CloseRejectsWhenOthersHaveClaims(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/bdh/command" {
@@ -1329,7 +1343,7 @@ func TestPassthrough_CloseWithJumpInWhenOthersHaveClaims(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	var messageSent bool
 	var sentToAgentID string
@@ -1406,7 +1420,7 @@ func TestPassthrough_CloseWorksWhenOnlyClaimant(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/bdh/command" {
@@ -1565,7 +1579,7 @@ func TestPassthrough_CloseShowsRelatedWorkInProgress(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	// Stub out `bd` in PATH
 	binDir := filepath.Join(tmpDir, "bin")
@@ -1807,7 +1821,7 @@ func TestPassthrough_CloseNoSuggestionsWhenNoRelatedWork(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	binDir := filepath.Join(tmpDir, "bin")
 	os.MkdirAll(binDir, 0755)
@@ -1871,7 +1885,7 @@ func TestPassthrough_JumpInNotNeededWhenApproved(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 
 	var messageSent bool
 
@@ -2210,7 +2224,7 @@ func TestPassthrough_ExportFailureFallsBackToExistingJSONL(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 	// Pre-existing JSONL with content (simulates multi-agent scenario where
 	// JSONL has more issues than the local database).
 	os.WriteFile(".beads/issues.jsonl",
@@ -2304,7 +2318,7 @@ func TestPassthrough_ExportFailureNoJSONLAborts(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 	// No pre-existing issues.jsonl — export failure means no data to sync.
 
 	binDir := filepath.Join(tmpDir, "bin")
@@ -2389,7 +2403,7 @@ func TestPassthrough_ExportFailureVerboseShowsCommandLine(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	os.MkdirAll(".beads", 0755)
+	setupBeadsDir(t)
 	os.WriteFile(".beads/issues.jsonl",
 		[]byte(`{"id":"bd-1","title":"Test","status":"open","priority":2,"issue_type":"task"}`+"\n"),
 		0644)

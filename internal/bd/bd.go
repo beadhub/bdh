@@ -61,9 +61,19 @@ func (r *Runner) Run(ctx context.Context, args []string) (*Result, error) {
 	return result, nil
 }
 
-func commandFromArgs(args []string) string {
+// CommandFromArgs extracts the bd command name from args, skipping global
+// flags like --db, --actor, and --lock-timeout.
+func CommandFromArgs(args []string) string {
+	cmd, _ := CommandIndexFromArgs(args)
+	return cmd
+}
+
+// CommandIndexFromArgs extracts the bd command name and its index in args,
+// skipping global flags like --db, --actor, and --lock-timeout.
+// Returns ("", -1) if no command is found.
+func CommandIndexFromArgs(args []string) (string, int) {
 	if len(args) == 0 {
-		return ""
+		return "", -1
 	}
 
 	i := 0
@@ -96,15 +106,15 @@ func commandFromArgs(args []string) string {
 	}
 
 	if i >= len(args) {
-		return ""
+		return "", -1
 	}
-	return args[i]
+	return args[i], i
 }
 
 // IsMutationCommand returns true if the command modifies state
 // and should trigger a sync after execution.
 func IsMutationCommand(args []string) bool {
-	switch commandFromArgs(args) {
+	switch CommandFromArgs(args) {
 	case "create", "close", "update", "delete", "reopen":
 		return true
 	case "dep":

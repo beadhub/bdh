@@ -421,6 +421,120 @@ func TestGetWarning_NonGitDirectory(t *testing.T) {
 	}
 }
 
+func TestIsInitialized_WithDatabase(t *testing.T) {
+	// Create a temp git repo with .beads/beads.db
+	tmpDir, err := os.MkdirTemp("", "beads-test-init-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tmpDir, err = filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "beads.db"), []byte("fake db"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	ResetCache()
+
+	if !IsInitialized() {
+		t.Error("IsInitialized() = false, want true (beads.db exists)")
+	}
+}
+
+func TestIsInitialized_WithoutDatabase(t *testing.T) {
+	// Create a temp git repo with .beads/ but NO beads.db
+	tmpDir, err := os.MkdirTemp("", "beads-test-noinit-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tmpDir, err = filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// No beads.db created
+
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	ResetCache()
+
+	if IsInitialized() {
+		t.Error("IsInitialized() = true, want false (no beads.db)")
+	}
+}
+
+func TestIsInitialized_NoBeadsDir(t *testing.T) {
+	// Create a temp git repo with NO .beads/ directory
+	tmpDir, err := os.MkdirTemp("", "beads-test-nodir-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	ResetCache()
+
+	if IsInitialized() {
+		t.Error("IsInitialized() = true, want false (no .beads directory)")
+	}
+}
+
 func TestSyncStatePath(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, ".beadhub")

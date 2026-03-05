@@ -145,6 +145,14 @@ func SyncStatePath() string {
 	return filepath.Join(workspaceRoot, ".beadhub-cache", "sync-state.json")
 }
 
+// IsInitialized returns true if bd (beads) has been initialized in this
+// workspace — i.e. a .beads directory exists with a beads.db database.
+func IsInitialized() bool {
+	dbPath := DatabasePath()
+	info, err := os.Stat(dbPath)
+	return err == nil && !info.IsDir()
+}
+
 // ResetCache resets the cached beads directory. This is intended for use
 // by tests that need to change directory between subtests.
 // In production, the cache is safe because the working directory
