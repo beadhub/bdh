@@ -489,7 +489,10 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 		}
 	} else {
 		// Native mode: use aweb /v1/tasks API (bd not initialized)
-		nativeResult, err := runNative(cleanArgs)
+		if aw == nil {
+			return nil, fmt.Errorf("native mode requires aweb client — run 'bdh :init' first")
+		}
+		nativeResult, err := runNative(aw, cleanArgs)
 		if err != nil {
 			return nil, fmt.Errorf("native mode: %w", err)
 		}
