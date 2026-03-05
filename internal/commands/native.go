@@ -2,8 +2,11 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -57,9 +60,37 @@ func parseNativeCommand(args []string) (cmd string, remaining []string, err erro
 
 const nativeTimeout = 10 * time.Second
 
+// nativeAuth carries authentication for direct HTTP calls to endpoints
+// not yet available in the aweb Go SDK.
+type nativeAuth struct {
+	baseURL string
+	apiKey  string
+}
+
+// blockedTaskEntry represents a task with its blockers, as returned by
+// GET /v1/tasks/blocked.
+type blockedTaskEntry struct {
+	TaskRef   string             `json:"task_ref"`
+	Title     string             `json:"title"`
+	Status    string             `json:"status"`
+	Priority  int                `json:"priority"`
+	TaskType  string             `json:"task_type"`
+	BlockedBy []aweb.TaskDepView `json:"blocked_by"`
+}
+
+type blockedTasksResponse struct {
+	Tasks []blockedTaskEntry `json:"tasks"`
+}
+
 // runNative executes a command in native mode using the aweb /v1/tasks API.
 // This is called when bd is not initialized in the workspace.
 func runNative(aw *aweb.Client, args []string) (*bd.Result, error) {
+	return runNativeWithAuth(aw, args, nil)
+}
+
+// runNativeWithAuth is like runNative but also accepts auth info for direct
+// HTTP calls to endpoints not yet in the aweb SDK.
+func runNativeWithAuth(aw *aweb.Client, args []string, auth *nativeAuth) (*bd.Result, error) {
 	cmd, remaining, err := parseNativeCommand(args)
 	if err != nil {
 		return nil, err
@@ -83,7 +114,7 @@ func runNative(aw *aweb.Client, args []string) (*bd.Result, error) {
 	case "ready":
 		output, err = nativeReady(ctx, aw)
 	case "blocked":
-		output, err = nativeBlocked(ctx, aw)
+		output, err = nativeBlocked(ctx, aw, auth)
 	case "dep":
 		output, err = nativeDep(ctx, aw, remaining)
 	case "sync":
@@ -437,56 +468,62 @@ func nativeReady(ctx context.Context, aw *aweb.Client) (string, error) {
 	return sb.String(), nil
 }
 
-func nativeBlocked(ctx context.Context, aw *aweb.Client) (string, error) {
-	// List all open tasks, then filter to those with open blockers
-	resp, err := aw.TaskList(ctx, aweb.TaskListParams{Status: "open"})
+func nativeBlocked(ctx context.Context, aw *aweb.Client, auth *nativeAuth) (string, error) {
+	resp, err := fetchBlockedTasks(ctx, auth)
 	if err != nil {
-		return "", fmt.Errorf("listing tasks: %w", err)
+		return "", fmt.Errorf("listing blocked tasks: %w", err)
 	}
 
-	// For each open task, check if it has open blockers
-	var blocked []string
-	var truncated bool
-	var checked int
-	for _, t := range resp.Tasks {
-		task, err := aw.TaskGet(ctx, t.TaskRef)
-		if err != nil {
-			if ctx.Err() != nil {
-				truncated = true
-				break
-			}
-			continue
-		}
-		checked++
-		var openBlockers []string
-		for _, dep := range task.BlockedBy {
-			if dep.Status != "closed" {
-				openBlockers = append(openBlockers, dep.TaskRef)
-			}
-		}
-		if len(openBlockers) > 0 {
-			icon := priorityIcon(t.Priority)
-			blocked = append(blocked, fmt.Sprintf("%s %s [%s P%d] [%s] - %s (blocked by: %s)",
-				icon, t.TaskRef, icon, t.Priority, t.TaskType, t.Title,
-				strings.Join(openBlockers, ", ")))
-		}
-	}
-
-	if len(blocked) == 0 && !truncated {
+	if len(resp.Tasks) == 0 {
 		return "No blocked tasks.\n", nil
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Blocked tasks (%d):\n\n", len(blocked)))
-	for _, line := range blocked {
-		sb.WriteString(line)
-		sb.WriteString("\n")
-	}
-	if truncated {
-		sb.WriteString(fmt.Sprintf("\nWarning: results truncated (checked %d of %d tasks before timeout)\n",
-			checked, len(resp.Tasks)))
+	sb.WriteString(fmt.Sprintf("Blocked tasks (%d):\n\n", len(resp.Tasks)))
+	for _, t := range resp.Tasks {
+		var blockerRefs []string
+		for _, dep := range t.BlockedBy {
+			blockerRefs = append(blockerRefs, dep.TaskRef)
+		}
+		icon := priorityIcon(t.Priority)
+		sb.WriteString(fmt.Sprintf("%s %s [%s P%d] [%s] - %s (blocked by: %s)\n",
+			icon, t.TaskRef, icon, t.Priority, t.TaskType, t.Title,
+			strings.Join(blockerRefs, ", ")))
 	}
 	return sb.String(), nil
+}
+
+// fetchBlockedTasks calls GET /v1/tasks/blocked directly.
+// This is a temporary workaround until the aw Go SDK adds TaskListBlocked.
+func fetchBlockedTasks(ctx context.Context, auth *nativeAuth) (*blockedTasksResponse, error) {
+	if auth == nil {
+		return nil, fmt.Errorf("authentication required for blocked tasks endpoint")
+	}
+
+	url := strings.TrimRight(auth.baseURL, "/") + "/v1/tasks/blocked"
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+auth.apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var out blockedTasksResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return &out, nil
 }
 
 func nativeDep(ctx context.Context, aw *aweb.Client, args []string) (string, error) {

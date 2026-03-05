@@ -494,7 +494,12 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 		if nativeErr != nil {
 			return nil, fmt.Errorf("native mode requires authentication — %w", nativeErr)
 		}
-		nativeResult, err := runNative(nativeAw, cleanArgs)
+		// Resolve auth for direct HTTP calls to endpoints not yet in the SDK.
+		var auth *nativeAuth
+		if sel, selErr := resolveBeadhubAuth(cfg.BeadhubURL); selErr == nil {
+			auth = &nativeAuth{baseURL: sel.BaseURL, apiKey: sel.APIKey}
+		}
+		nativeResult, err := runNativeWithAuth(nativeAw, cleanArgs, auth)
 		if err != nil {
 			return nil, fmt.Errorf("native mode: %w", err)
 		}
