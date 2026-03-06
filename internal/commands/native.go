@@ -57,6 +57,15 @@ func parseNativeCommand(args []string) (cmd string, remaining []string, err erro
 	return cmd, remaining, nil
 }
 
+// nativePartialError signals that a command partially succeeded.
+// runNative uses this to return both stdout (successful output) and
+// stderr (error details) with a non-zero exit code.
+type nativePartialError struct {
+	msg string
+}
+
+func (e *nativePartialError) Error() string { return e.msg }
+
 // runNative executes a command in native mode using the aweb /v1/tasks API.
 // This is called when bd is not initialized in the workspace.
 func runNative(aw *aweb.Client, args []string) (*bd.Result, error) {
@@ -109,6 +118,14 @@ func runNative(aw *aweb.Client, args []string) (*bd.Result, error) {
 	}
 
 	if err != nil {
+		var partial *nativePartialError
+		if errors.As(err, &partial) {
+			return &bd.Result{
+				Stdout:   output,
+				Stderr:   partial.Error() + "\n",
+				ExitCode: 1,
+			}, nil
+		}
 		return &bd.Result{
 			Stderr:   err.Error() + "\n",
 			ExitCode: 1,
@@ -274,11 +291,14 @@ func nativeCreate(ctx context.Context, aw *aweb.Client, args []string, jsonMode 
 		return "", fmt.Errorf("--title is required")
 	}
 
+	const defaultPriority = 2 // matches bd default
+
 	req := &aweb.TaskCreateRequest{
 		Title:       title,
 		Description: parseFlagValue(args, "--description"),
 		Notes:       parseFlagValue(args, "--notes"),
 		TaskType:    parseFlagValue(args, "--type"),
+		Priority:    defaultPriority,
 	}
 
 	if p := parseFlagValue(args, "--priority"); p != "" {
@@ -483,21 +503,22 @@ func nativeClose(ctx context.Context, aw *aweb.Client, args []string, jsonMode b
 		}
 	}
 
-	if failures > 0 && failures == len(refs) {
-		if jsonMode {
-			return jsonOutput(map[string]any{
-				"closed":   jsonClosed,
-				"failures": jsonFailed,
-			})
-		}
-		return "", fmt.Errorf("%s", strings.TrimSpace(sb.String()))
-	}
-
 	if jsonMode {
-		return jsonOutput(map[string]any{
+		output, jerr := jsonOutput(map[string]any{
 			"closed":   jsonClosed,
 			"failures": jsonFailed,
 		})
+		if jerr != nil {
+			return "", jerr
+		}
+		if failures > 0 {
+			return output, &nativePartialError{msg: fmt.Sprintf("failed to close %d of %d tasks", failures, len(refs))}
+		}
+		return output, nil
+	}
+
+	if failures > 0 {
+		return sb.String(), &nativePartialError{msg: fmt.Sprintf("failed to close %d of %d tasks", failures, len(refs))}
 	}
 	return sb.String(), nil
 }

@@ -770,6 +770,69 @@ func TestFormatTaskLine_LeadingIconMatchesPriority(t *testing.T) {
 	}
 }
 
+// --- Bug fix tests (code review round 3) ---
+
+func TestNativeClose_PartialFailure_ExitCode(t *testing.T) {
+	// Partial close failure should return non-zero exit code
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Method == "PATCH" {
+			ref := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+			if ref == "bdh-bad" {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{"detail": "not found"})
+				return
+			}
+			json.NewEncoder(w).Encode(aweb.TaskUpdateResponse{
+				Task: aweb.Task{TaskRef: ref, Title: "Task " + ref, Status: "closed"},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"close", "bdh-001", "bdh-bad"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode == 0 {
+		t.Errorf("exit code = 0, want non-zero for partial failure")
+	}
+	// Should still show the success
+	if !strings.Contains(result.Stdout, "Closed bdh-001") {
+		t.Errorf("stdout should contain successful close")
+	}
+}
+
+func TestNativeCreate_DefaultPriority(t *testing.T) {
+	// When --priority is omitted, create should send priority=2 (matching bd default)
+	var gotPriority float64
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks" && r.Method == "POST" {
+			var req map[string]any
+			json.NewDecoder(r.Body).Decode(&req)
+			if p, ok := req["priority"]; ok {
+				gotPriority = p.(float64)
+			}
+			json.NewEncoder(w).Encode(aweb.Task{TaskRef: "bdh-001", Title: "Test", Priority: 2})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"create", "--title", "Test"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if gotPriority != 2 {
+		t.Errorf("priority = %v, want 2 (bd default)", gotPriority)
+	}
+}
+
 // --- Bug fix tests (code review round 2) ---
 
 func TestNativeClose_PartialFailure_JSON(t *testing.T) {
@@ -795,9 +858,9 @@ func TestNativeClose_PartialFailure_JSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	// Should still succeed (partial failure), but JSON must indicate the failure
-	if result.ExitCode != 0 {
-		t.Fatalf("exit code = %d, want 0 (partial success)", result.ExitCode)
+	// Partial failure → non-zero exit code, but JSON stdout is still produced
+	if result.ExitCode == 0 {
+		t.Fatalf("exit code = 0, want non-zero for partial failure")
 	}
 
 	var output map[string]any
