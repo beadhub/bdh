@@ -21,6 +21,7 @@ var nativeCommands = map[string]bool{
 	"show":    true,
 	"update":  true,
 	"close":   true,
+	"delete":  true,
 	"ready":   true,
 	"blocked": true,
 	"dep":     true,
@@ -111,6 +112,8 @@ func runNative(aw *aweb.Client, args []string) (*bd.Result, error) {
 		}
 	case "stats":
 		output, err = nativeStats(ctx, aw, jsonMode)
+	case "delete":
+		output, err = nativeDelete(ctx, aw, remaining, jsonMode)
 	case "reopen":
 		output, err = nativeReopen(ctx, aw, remaining, jsonMode)
 	default:
@@ -523,6 +526,23 @@ func nativeClose(ctx context.Context, aw *aweb.Client, args []string, jsonMode b
 		return sb.String(), &nativePartialError{msg: fmt.Sprintf("failed to close %d of %d tasks", failures, len(refs))}
 	}
 	return sb.String(), nil
+}
+
+func nativeDelete(ctx context.Context, aw *aweb.Client, args []string, jsonMode bool) (string, error) {
+	ref := positionalArg(args)
+	if ref == "" {
+		return "", fmt.Errorf("usage: delete <ref>")
+	}
+
+	err := aw.TaskDelete(ctx, ref)
+	if err != nil {
+		return "", fmt.Errorf("deleting task: %w", err)
+	}
+
+	if jsonMode {
+		return jsonOutput(map[string]string{"deleted": ref})
+	}
+	return fmt.Sprintf("✓ Deleted %s\n", ref), nil
 }
 
 func nativeReady(ctx context.Context, aw *aweb.Client, jsonMode bool) (string, error) {

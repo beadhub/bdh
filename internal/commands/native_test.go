@@ -1525,6 +1525,79 @@ func TestNativeDep_List_JSON(t *testing.T) {
 	}
 }
 
+func TestNativeDelete(t *testing.T) {
+	var gotPath, gotMethod string
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Method == "DELETE" {
+			gotPath = r.URL.Path
+			gotMethod = r.Method
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"delete", "bdh-001"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if gotMethod != "DELETE" {
+		t.Errorf("method = %q, want DELETE", gotMethod)
+	}
+	if !strings.Contains(gotPath, "/tasks/bdh-001") {
+		t.Errorf("path = %q, want to contain /tasks/bdh-001", gotPath)
+	}
+	if !strings.Contains(result.Stdout, "Deleted") {
+		t.Errorf("stdout = %q, want confirmation of deletion", result.Stdout)
+	}
+}
+
+func TestNativeDelete_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Method == "DELETE" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"delete", "bdh-001", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var data map[string]string
+	if err := json.Unmarshal([]byte(result.Stdout), &data); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if data["deleted"] != "bdh-001" {
+		t.Errorf("deleted = %q, want bdh-001", data["deleted"])
+	}
+}
+
+func TestNativeDelete_NoRef(t *testing.T) {
+	_, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	result, err := runNative(client, []string{"delete"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Errorf("exit code = %d, want 1", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "usage") {
+		t.Errorf("stderr = %q, want usage hint", result.Stderr)
+	}
+}
+
 func TestNativeDep_Remove(t *testing.T) {
 	var gotPath, gotMethod string
 	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
