@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -61,37 +59,9 @@ func parseNativeCommand(args []string) (cmd string, remaining []string, err erro
 
 const nativeTimeout = 10 * time.Second
 
-// nativeAuth carries authentication for direct HTTP calls to endpoints
-// not yet available in the aweb Go SDK.
-type nativeAuth struct {
-	baseURL string
-	apiKey  string
-}
-
-// blockedTaskEntry represents a task with its blockers, as returned by
-// GET /v1/tasks/blocked.
-type blockedTaskEntry struct {
-	TaskRef   string             `json:"task_ref"`
-	Title     string             `json:"title"`
-	Status    string             `json:"status"`
-	Priority  int                `json:"priority"`
-	TaskType  string             `json:"task_type"`
-	BlockedBy []aweb.TaskDepView `json:"blocked_by"`
-}
-
-type blockedTasksResponse struct {
-	Tasks []blockedTaskEntry `json:"tasks"`
-}
-
 // runNative executes a command in native mode using the aweb /v1/tasks API.
 // This is called when bd is not initialized in the workspace.
 func runNative(aw *aweb.Client, args []string) (*bd.Result, error) {
-	return runNativeWithAuth(aw, args, nil)
-}
-
-// runNativeWithAuth is like runNative but also accepts auth info for direct
-// HTTP calls to endpoints not yet in the aweb SDK.
-func runNativeWithAuth(aw *aweb.Client, args []string, auth *nativeAuth) (*bd.Result, error) {
 	jsonMode := hasFlag(args, "--json")
 
 	cmd, remaining, err := parseNativeCommand(args)
@@ -121,7 +91,7 @@ func runNativeWithAuth(aw *aweb.Client, args []string, auth *nativeAuth) (*bd.Re
 	case "ready":
 		output, err = nativeReady(ctx, aw, jsonMode)
 	case "blocked":
-		output, err = nativeBlocked(ctx, aw, auth, jsonMode)
+		output, err = nativeBlocked(ctx, aw, jsonMode)
 	case "dep":
 		output, err = nativeDep(ctx, aw, remaining, jsonMode)
 	case "comment":
@@ -529,8 +499,8 @@ func nativeReady(ctx context.Context, aw *aweb.Client, jsonMode bool) (string, e
 	return sb.String(), nil
 }
 
-func nativeBlocked(ctx context.Context, aw *aweb.Client, auth *nativeAuth, jsonMode bool) (string, error) {
-	resp, err := fetchBlockedTasks(ctx, auth)
+func nativeBlocked(ctx context.Context, aw *aweb.Client, jsonMode bool) (string, error) {
+	resp, err := aw.TaskListBlocked(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing blocked tasks: %w", err)
 	}
@@ -546,49 +516,10 @@ func nativeBlocked(ctx context.Context, aw *aweb.Client, auth *nativeAuth, jsonM
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Blocked tasks (%d):\n\n", len(resp.Tasks)))
 	for _, t := range resp.Tasks {
-		var blockerRefs []string
-		for _, dep := range t.BlockedBy {
-			blockerRefs = append(blockerRefs, dep.TaskRef)
-		}
-		icon := priorityIcon(t.Priority)
-		sb.WriteString(fmt.Sprintf("%s %s [%s P%d] [%s] - %s (blocked by: %s)\n",
-			icon, t.TaskRef, icon, t.Priority, t.TaskType, t.Title,
-			strings.Join(blockerRefs, ", ")))
+		sb.WriteString(formatTaskLine(t))
+		sb.WriteString("\n")
 	}
 	return sb.String(), nil
-}
-
-// fetchBlockedTasks calls GET /v1/tasks/blocked directly.
-// This is a temporary workaround until the aw Go SDK adds TaskListBlocked.
-func fetchBlockedTasks(ctx context.Context, auth *nativeAuth) (*blockedTasksResponse, error) {
-	if auth == nil {
-		return nil, fmt.Errorf("authentication required for blocked tasks endpoint")
-	}
-
-	url := strings.TrimRight(auth.baseURL, "/") + "/v1/tasks/blocked"
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+auth.apiKey)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	var out blockedTasksResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
-	}
-	return &out, nil
 }
 
 func nativeDep(ctx context.Context, aw *aweb.Client, args []string, jsonMode bool) (string, error) {

@@ -486,21 +486,11 @@ func TestNativeStats(t *testing.T) {
 }
 
 func TestNativeBlocked(t *testing.T) {
-	// Uses the /v1/tasks/blocked endpoint (single API call, not N+1)
 	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/tasks/blocked" && r.Method == "GET" {
-			json.NewEncoder(w).Encode(blockedTasksResponse{
-				Tasks: []blockedTaskEntry{
-					{
-						TaskRef:  "bdh-001",
-						Title:    "Blocked task",
-						Priority: 1,
-						TaskType: "task",
-						Status:   "open",
-						BlockedBy: []aweb.TaskDepView{
-							{TaskRef: "bdh-000", Title: "Prerequisite", Status: "open"},
-						},
-					},
+			json.NewEncoder(w).Encode(aweb.TaskListResponse{
+				Tasks: []aweb.TaskSummary{
+					{TaskRef: "bdh-001", Title: "Blocked task", Priority: 1, TaskType: "task", Status: "open"},
 				},
 			})
 			return
@@ -509,8 +499,7 @@ func TestNativeBlocked(t *testing.T) {
 	})
 	defer server.Close()
 
-	auth := &nativeAuth{baseURL: server.URL, apiKey: "test-key"}
-	result, err := runNativeWithAuth(client, []string{"blocked"}, auth)
+	result, err := runNative(client, []string{"blocked"})
 	if err != nil {
 		t.Fatalf("runNative blocked: %v", err)
 	}
@@ -520,23 +509,19 @@ func TestNativeBlocked(t *testing.T) {
 	if !strings.Contains(result.Stdout, "bdh-001") {
 		t.Errorf("stdout missing blocked task bdh-001")
 	}
-	if !strings.Contains(result.Stdout, "bdh-000") {
-		t.Errorf("stdout missing blocker ref bdh-000")
-	}
 }
 
 func TestNativeBlocked_Empty(t *testing.T) {
 	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/tasks/blocked" && r.Method == "GET" {
-			json.NewEncoder(w).Encode(blockedTasksResponse{Tasks: []blockedTaskEntry{}})
+			json.NewEncoder(w).Encode(aweb.TaskListResponse{Tasks: []aweb.TaskSummary{}})
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
 	})
 	defer server.Close()
 
-	auth := &nativeAuth{baseURL: server.URL, apiKey: "test-key"}
-	result, err := runNativeWithAuth(client, []string{"blocked"}, auth)
+	result, err := runNative(client, []string{"blocked"})
 	if err != nil {
 		t.Fatalf("runNative blocked: %v", err)
 	}
@@ -986,12 +971,9 @@ func TestNativeClose_JSON(t *testing.T) {
 func TestNativeBlocked_JSON(t *testing.T) {
 	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/tasks/blocked" && r.Method == "GET" {
-			json.NewEncoder(w).Encode(blockedTasksResponse{
-				Tasks: []blockedTaskEntry{
-					{
-						TaskRef: "bdh-001", Title: "Blocked", Priority: 1, TaskType: "task", Status: "open",
-						BlockedBy: []aweb.TaskDepView{{TaskRef: "bdh-000", Title: "Blocker", Status: "open"}},
-					},
+			json.NewEncoder(w).Encode(aweb.TaskListResponse{
+				Tasks: []aweb.TaskSummary{
+					{TaskRef: "bdh-001", Title: "Blocked", Priority: 1, TaskType: "task", Status: "open"},
 				},
 			})
 			return
@@ -1000,8 +982,7 @@ func TestNativeBlocked_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	auth := &nativeAuth{baseURL: server.URL, apiKey: "test-key"}
-	result, err := runNativeWithAuth(client, []string{"blocked", "--json"}, auth)
+	result, err := runNative(client, []string{"blocked", "--json"})
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1009,7 +990,7 @@ func TestNativeBlocked_JSON(t *testing.T) {
 		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
 	}
 
-	var resp blockedTasksResponse
+	var resp aweb.TaskListResponse
 	if err := json.Unmarshal([]byte(result.Stdout), &resp); err != nil {
 		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
 	}
