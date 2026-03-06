@@ -57,8 +57,6 @@ func parseNativeCommand(args []string) (cmd string, remaining []string, err erro
 	return cmd, remaining, nil
 }
 
-const nativeTimeout = 10 * time.Second
-
 // runNative executes a command in native mode using the aweb /v1/tasks API.
 // This is called when bd is not initialized in the workspace.
 func runNative(aw *aweb.Client, args []string) (*bd.Result, error) {
@@ -73,7 +71,7 @@ func runNative(aw *aweb.Client, args []string) (*bd.Result, error) {
 		remaining = removeFlag(remaining, "--json")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), nativeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 
 	var output string
@@ -285,14 +283,20 @@ func nativeCreate(ctx context.Context, aw *aweb.Client, args []string, jsonMode 
 
 	if p := parseFlagValue(args, "--priority"); p != "" {
 		// Strip P/p prefix if present (e.g., "P2" -> "2")
+		raw := p
 		p = strings.TrimPrefix(strings.TrimPrefix(p, "P"), "p")
-		if pv, err := strconv.Atoi(p); err == nil {
-			req.Priority = pv
+		pv, err := strconv.Atoi(p)
+		if err != nil {
+			return "", fmt.Errorf("invalid priority %q — use a number 0-4 (e.g., --priority 2 or --priority P2)", raw)
 		}
+		req.Priority = pv
 	}
 
 	if labels := parseFlagValue(args, "--labels"); labels != "" {
 		req.Labels = strings.Split(labels, ",")
+	}
+	if assignee := parseFlagValue(args, "--assignee"); assignee != "" {
+		req.AssigneeAgentID = &assignee
 	}
 
 	task, err := aw.TaskCreate(ctx, req)
@@ -314,11 +318,13 @@ func nativeList(ctx context.Context, aw *aweb.Client, args []string, jsonMode bo
 	if assignee := parseFlagValue(args, "--assignee"); assignee != "" {
 		params.AssigneeAgentID = assignee
 	}
-	if p := parseFlagValue(args, "--priority"); p != "" {
-		p = strings.TrimPrefix(strings.TrimPrefix(p, "P"), "p")
-		if pv, err := strconv.Atoi(p); err == nil {
-			params.Priority = &pv
+	if raw := parseFlagValue(args, "--priority"); raw != "" {
+		p := strings.TrimPrefix(strings.TrimPrefix(raw, "P"), "p")
+		pv, err := strconv.Atoi(p)
+		if err != nil {
+			return "", fmt.Errorf("invalid priority %q — use a number 0-4 (e.g., --priority 2 or --priority P2)", raw)
 		}
+		params.Priority = &pv
 	}
 	if labels := parseFlagValue(args, "--labels"); labels != "" {
 		params.Labels = strings.Split(labels, ",")
@@ -395,16 +401,23 @@ func nativeUpdate(ctx context.Context, aw *aweb.Client, args []string, jsonMode 
 		req.AssigneeAgentID = &v
 		hasUpdate = true
 	}
-	if p := parseFlagValue(args, "--priority"); p != "" {
-		p = strings.TrimPrefix(strings.TrimPrefix(p, "P"), "p")
-		if pv, err := strconv.Atoi(p); err == nil {
-			req.Priority = &pv
-			hasUpdate = true
+	if raw := parseFlagValue(args, "--priority"); raw != "" {
+		p := strings.TrimPrefix(strings.TrimPrefix(raw, "P"), "p")
+		pv, err := strconv.Atoi(p)
+		if err != nil {
+			return "", fmt.Errorf("invalid priority %q — use a number 0-4 (e.g., --priority 2 or --priority P2)", raw)
 		}
+		req.Priority = &pv
+		hasUpdate = true
+	}
+	if v := parseFlagValue(args, "--labels"); v != "" {
+		labels := strings.Split(v, ",")
+		req.Labels = labels
+		hasUpdate = true
 	}
 
 	if !hasUpdate {
-		return "", fmt.Errorf("no fields to update — use --status, --title, --description, --notes, --type, --priority, or --assignee")
+		return "", fmt.Errorf("no fields to update — use --status, --title, --description, --notes, --type, --priority, --labels, or --assignee")
 	}
 
 	resp, err := aw.TaskUpdate(ctx, ref, req)
@@ -439,7 +452,8 @@ func nativeClose(ctx context.Context, aw *aweb.Client, args []string, jsonMode b
 	reason := parseFlagValue(args, "--reason")
 
 	var sb strings.Builder
-	var jsonResults []aweb.TaskUpdateResponse
+	var jsonClosed []aweb.TaskUpdateResponse
+	var jsonFailed []map[string]string
 	var failures int
 	for _, ref := range refs {
 		status := "closed"
@@ -451,12 +465,15 @@ func nativeClose(ctx context.Context, aw *aweb.Client, args []string, jsonMode b
 		resp, err := aw.TaskUpdate(ctx, ref, req)
 		if err != nil {
 			sb.WriteString(fmt.Sprintf("✗ Failed to close %s: %v\n", ref, err))
+			if jsonMode {
+				jsonFailed = append(jsonFailed, map[string]string{"ref": ref, "error": err.Error()})
+			}
 			failures++
 			continue
 		}
 
 		if jsonMode {
-			jsonResults = append(jsonResults, *resp)
+			jsonClosed = append(jsonClosed, *resp)
 		}
 		sb.WriteString(fmt.Sprintf("✓ Closed %s: %s\n", resp.TaskRef, resp.Title))
 		if len(resp.AutoClosed) > 0 {
@@ -467,11 +484,20 @@ func nativeClose(ctx context.Context, aw *aweb.Client, args []string, jsonMode b
 	}
 
 	if failures > 0 && failures == len(refs) {
+		if jsonMode {
+			return jsonOutput(map[string]any{
+				"closed":   jsonClosed,
+				"failures": jsonFailed,
+			})
+		}
 		return "", fmt.Errorf("%s", strings.TrimSpace(sb.String()))
 	}
 
 	if jsonMode {
-		return jsonOutput(jsonResults)
+		return jsonOutput(map[string]any{
+			"closed":   jsonClosed,
+			"failures": jsonFailed,
+		})
 	}
 	return sb.String(), nil
 }

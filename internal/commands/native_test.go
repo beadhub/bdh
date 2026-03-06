@@ -770,6 +770,197 @@ func TestFormatTaskLine_LeadingIconMatchesPriority(t *testing.T) {
 	}
 }
 
+// --- Bug fix tests (code review round 2) ---
+
+func TestNativeClose_PartialFailure_JSON(t *testing.T) {
+	// MAJ-1: Partial close failures must be reported in JSON output
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Method == "PATCH" {
+			ref := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+			if ref == "bdh-bad" {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]string{"detail": "not found"})
+				return
+			}
+			json.NewEncoder(w).Encode(aweb.TaskUpdateResponse{
+				Task: aweb.Task{TaskRef: ref, Title: "Task " + ref, Status: "closed"},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"close", "bdh-001", "bdh-bad", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	// Should still succeed (partial failure), but JSON must indicate the failure
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, want 0 (partial success)", result.ExitCode)
+	}
+
+	var output map[string]any
+	if err := json.Unmarshal([]byte(result.Stdout), &output); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	// Must have both closed and failed info
+	closed, hasClosed := output["closed"]
+	failures, hasFailures := output["failures"]
+	if !hasClosed {
+		t.Errorf("JSON output missing 'closed' key: %s", result.Stdout)
+	}
+	if !hasFailures {
+		t.Errorf("JSON output missing 'failures' key: %s", result.Stdout)
+	}
+	if closedArr, ok := closed.([]any); ok {
+		if len(closedArr) != 1 {
+			t.Errorf("expected 1 closed, got %d", len(closedArr))
+		}
+	}
+	if failArr, ok := failures.([]any); ok {
+		if len(failArr) != 1 {
+			t.Errorf("expected 1 failure, got %d", len(failArr))
+		}
+	}
+}
+
+func TestNativeClose_AllFail_JSON(t *testing.T) {
+	// All-fail close in JSON mode must still return JSON, not text
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Method == "PATCH" {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"detail": "not found"})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"close", "bdh-999", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	// All failed — should still produce valid JSON in stdout (with exit code 0 since
+	// JSON mode returns structured output; the failures key communicates the errors)
+	var output map[string]any
+	if err := json.Unmarshal([]byte(result.Stdout), &output); err != nil {
+		t.Fatalf("all-fail close --json should return valid JSON, got: %s", result.Stdout)
+	}
+	if _, ok := output["failures"]; !ok {
+		t.Errorf("JSON missing 'failures' key: %s", result.Stdout)
+	}
+}
+
+func TestNativeUpdate_Labels(t *testing.T) {
+	// MAJ-2: update must support --labels
+	var gotLabels bool
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Method == "PATCH" {
+			var req map[string]any
+			json.NewDecoder(r.Body).Decode(&req)
+			if _, ok := req["labels"]; ok {
+				gotLabels = true
+			}
+			ref := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+			json.NewEncoder(w).Encode(aweb.TaskUpdateResponse{
+				Task: aweb.Task{TaskRef: ref, Title: "Updated"},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"update", "bdh-001", "--labels", "frontend,urgent"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if !gotLabels {
+		t.Errorf("labels not sent in PATCH request body")
+	}
+}
+
+func TestNativeCreate_Assignee(t *testing.T) {
+	// MAJ-3: create must support --assignee
+	var gotAssignee string
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks" && r.Method == "POST" {
+			var req map[string]any
+			json.NewDecoder(r.Body).Decode(&req)
+			if a, ok := req["assignee_agent_id"]; ok && a != nil {
+				gotAssignee = a.(string)
+			}
+			json.NewEncoder(w).Encode(aweb.Task{TaskRef: "bdh-001", Title: "Test"})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"create", "--title", "Test", "--assignee", "agent-abc"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if gotAssignee != "agent-abc" {
+		t.Errorf("assignee = %q, want 'agent-abc'", gotAssignee)
+	}
+}
+
+func TestNativeCreate_InvalidPriority(t *testing.T) {
+	// MAJ-5: invalid priority should return an error, not silently send priority=0
+	var called bool
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks" && r.Method == "POST" {
+			called = true
+			json.NewEncoder(w).Encode(aweb.Task{TaskRef: "bdh-001", Title: "Test"})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"create", "--title", "Test", "--priority", "high"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Errorf("exit code = %d, want 1 for invalid priority", result.ExitCode)
+	}
+	if called {
+		t.Errorf("API should not be called when priority is invalid")
+	}
+	if !strings.Contains(result.Stderr, "invalid") {
+		t.Errorf("stderr = %q, want mention of 'invalid'", result.Stderr)
+	}
+}
+
+func TestNativeUpdate_InvalidPriority(t *testing.T) {
+	// MAJ-5: update with only --priority=bad should error about invalid value,
+	// not the generic "no fields to update" message
+	_, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	result, err := runNative(client, []string{"update", "bdh-001", "--priority", "high"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Errorf("exit code = %d, want 1", result.ExitCode)
+	}
+	if strings.Contains(result.Stderr, "no fields to update") {
+		t.Errorf("stderr = %q, should give specific invalid priority error", result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "invalid") || !strings.Contains(result.Stderr, "priority") {
+		t.Errorf("stderr = %q, want error about invalid priority", result.Stderr)
+	}
+}
+
 // --- JSON output tests ---
 
 func TestNativeList_JSON(t *testing.T) {
@@ -959,12 +1150,16 @@ func TestNativeClose_JSON(t *testing.T) {
 		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
 	}
 
-	var results []aweb.TaskUpdateResponse
-	if err := json.Unmarshal([]byte(result.Stdout), &results); err != nil {
+	var output map[string]any
+	if err := json.Unmarshal([]byte(result.Stdout), &output); err != nil {
 		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
 	}
-	if len(results) != 2 {
-		t.Errorf("got %d results, want 2", len(results))
+	closed, ok := output["closed"].([]any)
+	if !ok {
+		t.Fatalf("missing or invalid 'closed' key in JSON output: %s", result.Stdout)
+	}
+	if len(closed) != 2 {
+		t.Errorf("got %d closed, want 2", len(closed))
 	}
 }
 
