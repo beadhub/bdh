@@ -187,7 +187,7 @@ func jsonOutput(data any) (string, error) {
 // knownValueFlags lists flags that take a subsequent value argument.
 // Boolean flags (--json, --verbose, etc.) are NOT listed here.
 var knownValueFlags = map[string]bool{
-	"--title": true, "--description": true, "--notes": true, "--design": true,
+	"--title": true, "--description": true, "--notes": true,
 	"--type": true, "--priority": true, "--status": true, "--assignee": true,
 	"--labels": true, "--reason": true, "--limit": true,
 	"--db": true, "--actor": true, "--lock-timeout": true,

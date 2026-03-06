@@ -1525,6 +1525,97 @@ func TestNativeDep_List_JSON(t *testing.T) {
 	}
 }
 
+func TestNativeDep_Remove(t *testing.T) {
+	var gotPath, gotMethod string
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "DELETE" && strings.Contains(r.URL.Path, "/deps/") {
+			gotPath = r.URL.Path
+			gotMethod = r.Method
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"dep", "remove", "bdh-001", "bdh-000"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if gotMethod != "DELETE" {
+		t.Errorf("method = %q, want DELETE", gotMethod)
+	}
+	if !strings.Contains(gotPath, "/tasks/bdh-001/deps/bdh-000") {
+		t.Errorf("path = %q, want to contain /tasks/bdh-001/deps/bdh-000", gotPath)
+	}
+	if !strings.Contains(result.Stdout, "Removed") {
+		t.Errorf("stdout = %q, want confirmation of removal", result.Stdout)
+	}
+}
+
+func TestNativeDep_Remove_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "DELETE" && strings.Contains(r.URL.Path, "/deps/") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"dep", "remove", "bdh-001", "bdh-000", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var data map[string]string
+	if err := json.Unmarshal([]byte(result.Stdout), &data); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if data["ref"] != "bdh-001" {
+		t.Errorf("ref = %q, want bdh-001", data["ref"])
+	}
+	if data["removed"] != "bdh-000" {
+		t.Errorf("removed = %q, want bdh-000", data["removed"])
+	}
+}
+
+func TestNativeDep_Add_JSON(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/deps") && r.Method == "POST" {
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	result, err := runNative(client, []string{"dep", "add", "bdh-001", "bdh-000", "--json"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+
+	var data map[string]string
+	if err := json.Unmarshal([]byte(result.Stdout), &data); err != nil {
+		t.Fatalf("invalid JSON: %v\nstdout: %s", err, result.Stdout)
+	}
+	if data["ref"] != "bdh-001" {
+		t.Errorf("ref = %q, want bdh-001", data["ref"])
+	}
+	if data["depends_on"] != "bdh-000" {
+		t.Errorf("depends_on = %q, want bdh-000", data["depends_on"])
+	}
+}
+
 // --- Comment command tests ---
 
 func TestNativeComment_Add(t *testing.T) {
