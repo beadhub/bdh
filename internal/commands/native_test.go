@@ -904,8 +904,10 @@ func TestNativeClose_AllFail_JSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	// All failed — should still produce valid JSON in stdout (with exit code 0 since
-	// JSON mode returns structured output; the failures key communicates the errors)
+	// All failed — should produce valid JSON in stdout with exit code 1
+	if result.ExitCode != 1 {
+		t.Errorf("expected exit code 1 for all-fail close, got %d", result.ExitCode)
+	}
 	var output map[string]any
 	if err := json.Unmarshal([]byte(result.Stdout), &output); err != nil {
 		t.Fatalf("all-fail close --json should return valid JSON, got: %s", result.Stdout)
@@ -1018,6 +1020,47 @@ func TestNativeUpdate_InvalidPriority(t *testing.T) {
 	}
 	if strings.Contains(result.Stderr, "no fields to update") {
 		t.Errorf("stderr = %q, should give specific invalid priority error", result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "invalid") || !strings.Contains(result.Stderr, "priority") {
+		t.Errorf("stderr = %q, want error about invalid priority", result.Stderr)
+	}
+}
+
+func TestNativeCreate_OutOfRangePriority(t *testing.T) {
+	var called bool
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		json.NewEncoder(w).Encode(aweb.Task{TaskRef: "bdh-001", Title: "Test"})
+	})
+	defer server.Close()
+
+	for _, p := range []string{"5", "99", "-1", "P5"} {
+		called = false
+		result, err := runNative(client, []string{"create", "--title", "Test", "--priority", p})
+		if err != nil {
+			t.Fatalf("priority=%s: error: %v", p, err)
+		}
+		if result.ExitCode != 1 {
+			t.Errorf("priority=%s: exit code = %d, want 1", p, result.ExitCode)
+		}
+		if called {
+			t.Errorf("priority=%s: API should not be called for out-of-range priority", p)
+		}
+		if !strings.Contains(result.Stderr, "invalid") {
+			t.Errorf("priority=%s: stderr = %q, want mention of 'invalid'", p, result.Stderr)
+		}
+	}
+}
+
+func TestNativeList_InvalidPriority(t *testing.T) {
+	_, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	result, err := runNative(client, []string{"list", "--priority", "high"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Errorf("exit code = %d, want 1", result.ExitCode)
 	}
 	if !strings.Contains(result.Stderr, "invalid") || !strings.Contains(result.Stderr, "priority") {
 		t.Errorf("stderr = %q, want error about invalid priority", result.Stderr)

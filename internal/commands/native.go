@@ -306,7 +306,7 @@ func nativeCreate(ctx context.Context, aw *aweb.Client, args []string, jsonMode 
 		raw := p
 		p = strings.TrimPrefix(strings.TrimPrefix(p, "P"), "p")
 		pv, err := strconv.Atoi(p)
-		if err != nil {
+		if err != nil || pv < 0 || pv > 4 {
 			return "", fmt.Errorf("invalid priority %q — use a number 0-4 (e.g., --priority 2 or --priority P2)", raw)
 		}
 		req.Priority = pv
@@ -341,7 +341,7 @@ func nativeList(ctx context.Context, aw *aweb.Client, args []string, jsonMode bo
 	if raw := parseFlagValue(args, "--priority"); raw != "" {
 		p := strings.TrimPrefix(strings.TrimPrefix(raw, "P"), "p")
 		pv, err := strconv.Atoi(p)
-		if err != nil {
+		if err != nil || pv < 0 || pv > 4 {
 			return "", fmt.Errorf("invalid priority %q — use a number 0-4 (e.g., --priority 2 or --priority P2)", raw)
 		}
 		params.Priority = &pv
@@ -424,7 +424,7 @@ func nativeUpdate(ctx context.Context, aw *aweb.Client, args []string, jsonMode 
 	if raw := parseFlagValue(args, "--priority"); raw != "" {
 		p := strings.TrimPrefix(strings.TrimPrefix(raw, "P"), "p")
 		pv, err := strconv.Atoi(p)
-		if err != nil {
+		if err != nil || pv < 0 || pv > 4 {
 			return "", fmt.Errorf("invalid priority %q — use a number 0-4 (e.g., --priority 2 or --priority P2)", raw)
 		}
 		req.Priority = &pv
@@ -484,9 +484,10 @@ func nativeClose(ctx context.Context, aw *aweb.Client, args []string, jsonMode b
 
 		resp, err := aw.TaskUpdate(ctx, ref, req)
 		if err != nil {
-			sb.WriteString(fmt.Sprintf("✗ Failed to close %s: %v\n", ref, err))
 			if jsonMode {
 				jsonFailed = append(jsonFailed, map[string]string{"ref": ref, "error": err.Error()})
+			} else {
+				sb.WriteString(fmt.Sprintf("✗ Failed to close %s: %v\n", ref, err))
 			}
 			failures++
 			continue
@@ -494,11 +495,12 @@ func nativeClose(ctx context.Context, aw *aweb.Client, args []string, jsonMode b
 
 		if jsonMode {
 			jsonClosed = append(jsonClosed, *resp)
-		}
-		sb.WriteString(fmt.Sprintf("✓ Closed %s: %s\n", resp.TaskRef, resp.Title))
-		if len(resp.AutoClosed) > 0 {
-			for _, t := range resp.AutoClosed {
-				sb.WriteString(fmt.Sprintf("  ✓ Auto-closed %s: %s\n", t.TaskRef, t.Title))
+		} else {
+			sb.WriteString(fmt.Sprintf("✓ Closed %s: %s\n", resp.TaskRef, resp.Title))
+			if len(resp.AutoClosed) > 0 {
+				for _, t := range resp.AutoClosed {
+					sb.WriteString(fmt.Sprintf("  ✓ Auto-closed %s: %s\n", t.TaskRef, t.Title))
+				}
 			}
 		}
 	}
