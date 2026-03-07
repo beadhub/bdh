@@ -48,6 +48,7 @@ type runEvent struct {
 	DurationMS int
 	CostUSD    *float64
 	Session    string
+	IsError    bool
 }
 
 type claudeProvider struct{}
@@ -62,10 +63,13 @@ type claudeEnvelope struct {
 	Stats      struct {
 		DurationMS int `json:"duration_ms"`
 	} `json:"stats"`
-	CostUSD *float64 `json:"cost_usd"`
-	Session string   `json:"session_id"`
-	CWD     string   `json:"cwd"`
-	Model   string   `json:"model"`
+	CostUSD      *float64 `json:"cost_usd"`
+	TotalCostUSD *float64 `json:"total_cost_usd"`
+	Session      string   `json:"session_id"`
+	CWD          string   `json:"cwd"`
+	Model        string   `json:"model"`
+	Result       string   `json:"result"`
+	IsError      bool     `json:"is_error"`
 }
 
 type claudeEvent struct {
@@ -159,11 +163,17 @@ func (claudeProvider) ParseOutput(line string) (*runEvent, error) {
 		if duration == 0 {
 			duration = envelope.Stats.DurationMS
 		}
+		costUSD := envelope.CostUSD
+		if costUSD == nil {
+			costUSD = envelope.TotalCostUSD
+		}
 		return &runEvent{
 			Type:       runEventDone,
+			Text:       strings.TrimSpace(envelope.Result),
 			DurationMS: duration,
-			CostUSD:    envelope.CostUSD,
+			CostUSD:    costUSD,
 			Session:    envelope.Session,
+			IsError:    envelope.IsError,
 		}, nil
 	case "system":
 		text, err := claudeSystemEventText(envelope)

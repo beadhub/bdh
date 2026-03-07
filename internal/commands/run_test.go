@@ -1087,6 +1087,30 @@ func TestRunLoopPropagatesRunnerError(t *testing.T) {
 	}
 }
 
+func TestRunLoopPrefersProviderStructuredErrorOverRawExitStatus(t *testing.T) {
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      io.Discard,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+			onLine(`{"type":"result","duration_ms":320,"session_id":"s1","is_error":true,"result":"You've hit your limit"}`)
+			return errors.New("exit status 1")
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		Prompt:  "keep going",
+		MaxRuns: 1,
+	})
+	if err == nil {
+		t.Fatal("expected run to fail")
+	}
+	if err.Error() != "You've hit your limit" {
+		t.Fatalf("expected structured provider error, got %q", err)
+	}
+}
+
 func TestApplyControlEvent_BufferUpdatedRendersInputPrompt(t *testing.T) {
 	var output strings.Builder
 	loop := &runLoop{out: &output}
