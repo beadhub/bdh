@@ -100,3 +100,15 @@ func TestRunShortRepoNameFallsBackToRepoOrigin(t *testing.T) {
 		t.Fatalf("expected repo short name from repo origin, got %q", got)
 	}
 }
+
+func TestWrapRunScreenLineWrapsLongToolFields(t *testing.T) {
+	lines := wrapRunScreenLine(`  command="git fetch origin main && git log --oneline origin/main -5"`, 32)
+	if len(lines) < 2 {
+		t.Fatalf("expected wrapped lines, got %#v", lines)
+	}
+	for _, line := range lines[1:] {
+		if line == "" || line[:2] != "  " {
+			t.Fatalf("expected wrapped continuation lines to keep indentation, got %#v", lines)
+		}
+	}
+}

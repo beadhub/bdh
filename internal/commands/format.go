@@ -26,8 +26,12 @@ func formatRunDone(event *runEvent) string {
 }
 
 func formatRunToolInput(data map[string]any) string {
+	return strings.Join(formatRunToolInputLines(data), "  ")
+}
+
+func formatRunToolInputLines(data map[string]any) []string {
 	if len(data) == 0 {
-		return ""
+		return nil
 	}
 
 	keys := make([]string, 0, len(data))
@@ -41,12 +45,12 @@ func formatRunToolInput(data map[string]any) string {
 		value := data[key]
 		switch typed := value.(type) {
 		case string:
-			parts = append(parts, fmt.Sprintf("%s=%q", key, truncateRunText(typed, 60)))
+			parts = append(parts, fmt.Sprintf("%s=%q", key, truncateRunText(typed, 160)))
 		default:
-			parts = append(parts, fmt.Sprintf("%s=%s", key, truncateRunText(fmt.Sprintf("%v", typed), 60)))
+			parts = append(parts, fmt.Sprintf("%s=%s", key, truncateRunText(fmt.Sprintf("%v", typed), 160)))
 		}
 	}
-	return strings.Join(parts, "  ")
+	return parts
 }
 
 func truncateRunText(s string, max int) string {

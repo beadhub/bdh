@@ -431,10 +431,10 @@ func (m *runScreenModel) syncViewport(autoBottom bool) {
 func (m runScreenModel) formattedOutputLines() []string {
 	lines := make([]string, 0, len(m.lines)+1)
 	for _, line := range m.lines {
-		lines = append(lines, styleRunScreenLine(line, m.styles))
+		lines = appendWrappedStyledRunScreenLine(lines, line, m.width, m.styles)
 	}
 	if m.current != "" {
-		lines = append(lines, styleRunScreenLine(m.current, m.styles))
+		lines = appendWrappedStyledRunScreenLine(lines, m.current, m.width, m.styles)
 	}
 	return lines
 }
@@ -460,6 +460,105 @@ func appendRunScreenText(lines *[]string, current *string, text string) {
 		*lines = append(*lines, part)
 	}
 	*current = parts[len(parts)-1]
+}
+
+func appendWrappedStyledRunScreenLine(lines []string, line string, width int, styles runScreenStyles) []string {
+	for _, wrapped := range wrapRunScreenLine(line, width) {
+		lines = append(lines, styleRunScreenLine(wrapped, styles))
+	}
+	return lines
+}
+
+func wrapRunScreenLine(line string, width int) []string {
+	if width <= 0 || lipgloss.Width(line) <= width {
+		return []string{line}
+	}
+
+	indent := leadingWhitespace(line)
+	tokens := splitRunWrapTokens(line)
+	if len(tokens) == 0 {
+		return []string{line}
+	}
+
+	lines := make([]string, 0, 4)
+	current := ""
+	lineIndent := ""
+
+	for _, token := range tokens {
+		if current == "" {
+			current = strings.TrimLeft(token, " ")
+			if current == "" {
+				current = indent
+			}
+			continue
+		}
+
+		candidate := current + token
+		if lipgloss.Width(candidate) <= width {
+			current = candidate
+			continue
+		}
+
+		lines = append(lines, strings.TrimRight(current, " "))
+		if lineIndent == "" {
+			lineIndent = indent
+			if strings.TrimSpace(lineIndent) == "" {
+				lineIndent = "  "
+			}
+		}
+
+		trimmed := strings.TrimLeft(token, " ")
+		if trimmed == "" {
+			current = lineIndent
+			continue
+		}
+		current = lineIndent + trimmed
+		for lipgloss.Width(current) > width && width > lipgloss.Width(lineIndent) {
+			available := max(1, width-lipgloss.Width(lineIndent))
+			chunk, rest := splitRunWrapChunk(strings.TrimPrefix(current, lineIndent), available)
+			lines = append(lines, lineIndent+chunk)
+			if rest == "" {
+				current = lineIndent
+				break
+			}
+			current = lineIndent + rest
+		}
+	}
+
+	if strings.TrimSpace(current) != "" {
+		lines = append(lines, strings.TrimRight(current, " "))
+	}
+	if len(lines) == 0 {
+		return []string{line}
+	}
+	return lines
+}
+
+func splitRunWrapTokens(line string) []string {
+	parts := strings.SplitAfter(line, " ")
+	if len(parts) == 0 {
+		return []string{line}
+	}
+	return parts
+}
+
+func splitRunWrapChunk(s string, width int) (string, string) {
+	if lipgloss.Width(s) <= width {
+		return s, ""
+	}
+	runes := []rune(s)
+	if width >= len(runes) {
+		return s, ""
+	}
+	return string(runes[:width]), strings.TrimLeft(string(runes[width:]), " ")
+}
+
+func leadingWhitespace(s string) string {
+	idx := 0
+	for idx < len(s) && (s[idx] == ' ' || s[idx] == '\t') {
+		idx++
+	}
+	return s[:idx]
 }
 
 func styleRunScreenLine(line string, styles runScreenStyles) string {

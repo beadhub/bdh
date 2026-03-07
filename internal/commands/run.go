@@ -418,11 +418,10 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 			presenter.lastWasText = false
 		}
 		for _, call := range event.ToolCalls {
-			if input := formatRunToolInput(call.Input); input != "" {
-				l.printf("tool: %s  %s\n", call.Name, input)
-				continue
-			}
 			l.printf("tool: %s\n", call.Name)
+			for _, inputLine := range formatRunToolInputLines(call.Input) {
+				l.printf("  %s\n", inputLine)
+			}
 		}
 	case runEventToolResult:
 		state.StructuredOut = true
