@@ -106,15 +106,17 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 		defer stop()
 
+		screen := newRunScreenManager(cmd.InOrStdin(), cmd.OutOrStdout())
+
 		loop := &runLoop{
 			provider: provider,
 			runner:   realRunCommand,
 			sleep:    sleepWithContext,
 			now:      time.Now,
 			out:      cmd.OutOrStdout(),
-			control:  newTerminalRunInput(cmd.InOrStdin()),
+			control:  screen,
 			dispatch: dispatcher,
-			screen:   newRunScreenManager(cmd.OutOrStdout()),
+			screen:   screen,
 		}
 
 		opts := runLoopOptions{
@@ -157,10 +159,14 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 		defer func() { _ = l.control.Stop() }()
 	}
 	if l.screen != nil {
-		if err := l.screen.Start(); err != nil {
-			return err
+		if screenControl, ok := l.control.(*runScreenManager); ok && screenControl == l.screen {
+			// Bubble Tea screen manager also owns input; avoid starting it twice.
+		} else {
+			if err := l.screen.Start(); err != nil {
+				return err
+			}
+			defer func() { _ = l.screen.Stop() }()
 		}
-		defer func() { _ = l.screen.Stop() }()
 	}
 
 	state := &runState{}
