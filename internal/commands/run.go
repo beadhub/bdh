@@ -609,7 +609,14 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 	if l.dispatch != nil {
 		decision, err := l.dispatch.Next(ctx)
 		if err != nil {
-			return "", 0, err
+			l.printf("info: dispatch failed: %v\n", err)
+			if strings.TrimSpace(opts.Prompt) != "" {
+				l.println("info: falling back to the explicit prompt.")
+				return opts.Prompt, opts.WaitSeconds, nil
+			}
+			fallback := selectRunDispatch(runDispatchSummary{})
+			l.println("info: falling back to idle prompt until dispatch recovers.")
+			return fallback.Prompt, fallback.WaitSeconds, nil
 		}
 		return decision.Prompt, decision.WaitSeconds, nil
 	}

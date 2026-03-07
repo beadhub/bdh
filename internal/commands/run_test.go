@@ -42,12 +42,16 @@ func (f *fakeRunInputController) setPending(pending bool) {
 type fakeRunDispatcher struct {
 	mu        sync.Mutex
 	decisions []runDispatchDecision
+	err       error
 }
 
 func (f *fakeRunDispatcher) Next(context.Context) (runDispatchDecision, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if f.err != nil {
+		return runDispatchDecision{}, f.err
+	}
 	if len(f.decisions) == 0 {
 		return runDispatchDecision{}, errors.New("no dispatch decisions left")
 	}
@@ -571,5 +575,78 @@ func TestRunLoopUsesDispatcherAfterInitialPrompt(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(commands[1], " "), "dispatch prompt") {
 		t.Fatalf("expected second run to use dispatch prompt, got %q", strings.Join(commands[1], " "))
+	}
+}
+
+func TestRunLoopFallsBackToExplicitPromptOnDispatchError(t *testing.T) {
+	dispatcher := &fakeRunDispatcher{err: errors.New("server down")}
+	var commands [][]string
+	var output strings.Builder
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      &output,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		dispatch: dispatcher,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+			commands = append(commands, append([]string(nil), argv...))
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		Prompt:      "stable prompt",
+		WaitSeconds: 0,
+		MaxRuns:     2,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(commands) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(commands))
+	}
+	if !strings.Contains(strings.Join(commands[1], " "), "stable prompt") {
+		t.Fatalf("expected fallback explicit prompt, got %q", strings.Join(commands[1], " "))
+	}
+	if !strings.Contains(output.String(), "dispatch failed: server down") {
+		t.Fatalf("expected dispatch failure log, got %q", output.String())
+	}
+}
+
+func TestRunLoopFallsBackToIdlePromptOnDispatchErrorWithoutExplicitPrompt(t *testing.T) {
+	dispatcher := &fakeRunDispatcher{err: errors.New("server down")}
+	var commands [][]string
+	var output strings.Builder
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      &output,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		dispatch: dispatcher,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+			commands = append(commands, append([]string(nil), argv...))
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		WaitSeconds: 0,
+		MaxRuns:     1,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(commands))
+	}
+	if !strings.Contains(strings.Join(commands[0], " "), "Check in with your coordinator") {
+		t.Fatalf("expected idle fallback prompt, got %q", strings.Join(commands[0], " "))
+	}
+	if !strings.Contains(output.String(), "falling back to idle prompt") {
+		t.Fatalf("expected idle fallback log, got %q", output.String())
 	}
 }
