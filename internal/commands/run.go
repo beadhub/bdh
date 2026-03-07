@@ -266,6 +266,7 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 	for {
 		select {
 		case err := <-errCh:
+			l.drainPendingControlEvents(state)
 			state.RanOnce = true
 			if state.RunInterrupted && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 				state.RunInterrupted = false
@@ -279,6 +280,17 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 			cancel()
 			state.StopRequested = true
 			return ctx.Err()
+		}
+	}
+}
+
+func (l *runLoop) drainPendingControlEvents(state *runState) {
+	for {
+		select {
+		case event := <-l.controlEvents():
+			l.applyControlEvent(event, state, false, nil)
+		default:
+			return
 		}
 	}
 }

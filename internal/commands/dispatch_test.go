@@ -70,10 +70,10 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 	}
 
 	idleDecision := selectRunDispatch(runDispatchSummary{})
-	if idleDecision.WaitSeconds != 60 {
+	if idleDecision.WaitSeconds != 30 {
 		t.Fatalf("expected long idle wait, got %d", idleDecision.WaitSeconds)
 	}
-	if !containsText(idleDecision.Prompt, "Check in with your coordinator") {
+	if !containsText(idleDecision.Prompt, "Check for pending chat messages or unread mail") {
 		t.Fatalf("expected idle prompt, got: %q", idleDecision.Prompt)
 	}
 }
@@ -183,7 +183,7 @@ func TestRunLoopFallsBackToIdlePromptOnDispatchErrorWithoutExplicitPrompt(t *tes
 	if len(commands) != 1 {
 		t.Fatalf("expected 1 run, got %d", len(commands))
 	}
-	if !containsText(joinArgs(commands[0]), "Check in with your coordinator") {
+	if !containsText(joinArgs(commands[0]), "Check for pending chat messages or unread mail") {
 		t.Fatalf("expected idle fallback prompt, got %q", joinArgs(commands[0]))
 	}
 	if !containsText(output.String(), "falling back to idle prompt") {

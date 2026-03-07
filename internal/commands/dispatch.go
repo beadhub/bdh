@@ -140,8 +140,8 @@ func selectRunDispatch(summary runDispatchSummary) runDispatchDecision {
 		}
 	default:
 		return runDispatchDecision{
-			Prompt:      "Nothing is pending right now. Check in with your coordinator, stay available, and be ready to respond quickly if chat or mail arrives.",
-			WaitSeconds: 60,
+			Prompt:      "Check for pending chat messages or unread mail. If nothing needs attention, wait for new work.",
+			WaitSeconds: 30,
 		}
 	}
 }
