@@ -91,6 +91,49 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 	}
 }
 
+func TestSelectRunDispatchIgnoreBeadsSkipsClaimAndReadyWork(t *testing.T) {
+	defaults := withRunDispatchDefaults(runDispatchDefaults{IgnoreBeads: true, IdleWaitSeconds: 17})
+	claim := ClaimInfo{BeadID: "bdh-421.3", Title: "Dispatch logic"}
+	task := runReadyTask{ID: "bdh-54y", Title: "List active"}
+
+	decision := selectRunDispatch(runDispatchSummary{
+		CurrentClaim: &claim,
+		ReadyTask:    &task,
+	}, defaults)
+
+	if !decision.Skip {
+		t.Fatalf("expected ignore-beads mode to skip when only bead work is present, got %#v", decision)
+	}
+	if decision.WaitSeconds != 17 {
+		t.Fatalf("expected configured idle wait, got %d", decision.WaitSeconds)
+	}
+}
+
+func TestSelectRunDispatchIgnoreBeadsStillWakesForComms(t *testing.T) {
+	defaults := withRunDispatchDefaults(runDispatchDefaults{IgnoreBeads: true})
+
+	chatDecision := selectRunDispatch(runDispatchSummary{
+		PendingChat: &runPendingChat{
+			Alias: "grace",
+			Messages: []runCommsMessage{
+				{From: "grace", Body: "Please reply on this now."},
+			},
+		},
+	}, defaults)
+	if chatDecision.Skip {
+		t.Fatalf("expected chat to wake agent even with ignore-beads")
+	}
+
+	mailDecision := selectRunDispatch(runDispatchSummary{
+		UnreadMail: []runUnreadMail{
+			{From: "grace", Subject: "Review", Body: "Please reply on this now."},
+		},
+	}, defaults)
+	if mailDecision.Skip {
+		t.Fatalf("expected mail to wake agent even with ignore-beads")
+	}
+}
+
 func TestTruncateRunDispatchBody(t *testing.T) {
 	long := strings.Repeat("a", runDispatchBodyLimit+20)
 	got := truncateRunDispatchBody(long)

@@ -53,6 +53,7 @@ type runReadyTask struct {
 
 type runDispatchDefaults struct {
 	IdleWaitSeconds int
+	IgnoreBeads     bool
 }
 
 const (
@@ -115,13 +116,17 @@ func (d *beadhubRunDispatcher) summary(ctx context.Context) (runDispatchSummary,
 	}
 
 	if status, err := fetchStatusWithConfig(d.cfg); err == nil && len(status.YourClaims) > 0 {
-		claim := status.YourClaims[0]
-		summary.CurrentClaim = &claim
+		if !d.defaults.IgnoreBeads {
+			claim := status.YourClaims[0]
+			summary.CurrentClaim = &claim
+		}
 	}
 
-	if readyTasks, err := d.readyTasks(ctx); err == nil && len(readyTasks) > 0 {
-		task := readyTasks[0]
-		summary.ReadyTask = &task
+	if !d.defaults.IgnoreBeads {
+		if readyTasks, err := d.readyTasks(ctx); err == nil && len(readyTasks) > 0 {
+			task := readyTasks[0]
+			summary.ReadyTask = &task
+		}
 	}
 
 	return summary, nil
@@ -171,12 +176,12 @@ func selectRunDispatch(summary runDispatchSummary, defaults runDispatchDefaults)
 			Prompt:      buildUnreadMailPrompt(summary.UnreadMail),
 			WaitSeconds: 5,
 		}
-	case summary.CurrentClaim != nil:
+	case !defaults.IgnoreBeads && summary.CurrentClaim != nil:
 		return runDispatchDecision{
 			Prompt:      buildClaimPrompt(*summary.CurrentClaim),
 			WaitSeconds: 20,
 		}
-	case summary.ReadyTask != nil:
+	case !defaults.IgnoreBeads && summary.ReadyTask != nil:
 		return runDispatchDecision{
 			Prompt:      buildReadyTaskPrompt(*summary.ReadyTask),
 			WaitSeconds: 20,

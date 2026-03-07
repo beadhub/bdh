@@ -75,6 +75,7 @@ var (
 	runAllowedTools string
 	runModel        string
 	runProviderName string
+	runIgnoreBeads  bool
 )
 
 var runCmd = &cobra.Command{
@@ -117,6 +118,7 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 
 		dispatchDefaults := runDispatchDefaults{
 			IdleWaitSeconds: settings.IdleWaitSeconds,
+			IgnoreBeads:     runIgnoreBeads,
 		}
 
 		var dispatcher runDispatcher
@@ -171,6 +173,7 @@ func init() {
 	runCmd.Flags().StringVar(&runAllowedTools, "allowed-tools", "", "Provider-specific allowed tools string")
 	runCmd.Flags().StringVar(&runModel, "model", "", "Provider-specific model override")
 	runCmd.Flags().StringVar(&runProviderName, "provider", "claude", "Agent provider to run")
+	runCmd.Flags().BoolVar(&runIgnoreBeads, "ignore-beads", false, "Ignore claims and ready beads; only wake for incoming chat or unread mail")
 }
 
 func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
