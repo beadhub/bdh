@@ -334,6 +334,8 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 			l.drainPendingControlEvents(state)
 			state.RanOnce = true
 			if state.RunInterrupted {
+				state.Paused = true
+				state.PauseAfterRun = true
 				state.RunInterrupted = false
 				return nil
 			}
@@ -632,7 +634,7 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		state.PendingInput = false
 		state.InputBuffer = ""
 		state.Paused = true
-		state.PauseAfterRun = false
+		state.PauseAfterRun = true
 		if activeRun && cancel != nil {
 			state.RunInterrupted = true
 			l.println("\nstopped current run. paused. use /resume, /quit, or type a prompt to continue.")

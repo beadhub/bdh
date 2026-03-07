@@ -391,6 +391,29 @@ func TestRunLoopStopTreatsCanceledProcessExitAsNonFatal(t *testing.T) {
 	}
 }
 
+func TestApplyControlEventStopLatchesPauseAfterRunDuringActiveRun(t *testing.T) {
+	loop := &runLoop{out: io.Discard}
+	state := &runState{}
+	canceled := false
+
+	loop.applyControlEvent(runControlEvent{Type: runControlStop}, state, true, func() {
+		canceled = true
+	})
+
+	if !canceled {
+		t.Fatal("expected active /stop to cancel the run")
+	}
+	if !state.RunInterrupted {
+		t.Fatal("expected /stop to mark the run as interrupted")
+	}
+	if !state.Paused {
+		t.Fatal("expected /stop to leave the loop paused")
+	}
+	if !state.PauseAfterRun {
+		t.Fatal("expected /stop to latch pause-after-run across the cancellation boundary")
+	}
+}
+
 func TestRunLoopQuitCancelsActiveRunAndExits(t *testing.T) {
 	controller := newFakeRunInputController()
 	runStarted := make(chan struct{})
