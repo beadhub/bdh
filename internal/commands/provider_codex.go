@@ -44,7 +44,7 @@ func (codexProvider) BuildCommand(prompt string, opts runBuildOptions) ([]string
 	if opts.ContinueSession {
 		command = append(command, "resume", "--last")
 	}
-	command = append(command, "--json", "--dangerously-bypass-approvals-and-sandbox")
+	command = append(command, "--json")
 	if strings.TrimSpace(opts.Model) != "" {
 		command = append(command, "-m", opts.Model)
 	}

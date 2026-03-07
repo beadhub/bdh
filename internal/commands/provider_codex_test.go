@@ -13,7 +13,7 @@ func TestCodexProviderBuildCommand(t *testing.T) {
 	}
 
 	joined := joinArgs(command)
-	if !containsText(joined, "codex exec --json --dangerously-bypass-approvals-and-sandbox -m gpt-5-codex fix the bug") {
+	if !containsText(joined, "codex exec --json -m gpt-5-codex fix the bug") {
 		t.Fatalf("unexpected codex command: %q", joined)
 	}
 	if containsText(joined, "resume --last") {
@@ -32,7 +32,7 @@ func TestCodexProviderBuildCommandWithContinue(t *testing.T) {
 	}
 
 	joined := joinArgs(command)
-	if !containsText(joined, "codex exec resume --last --json --dangerously-bypass-approvals-and-sandbox continue working") {
+	if !containsText(joined, "codex exec resume --last --json continue working") {
 		t.Fatalf("expected resume --last codex command, got: %q", joined)
 	}
 }
