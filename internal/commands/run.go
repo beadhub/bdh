@@ -795,15 +795,6 @@ func resolveRunMissionPrompt(basePrompt string, overridePrompt string) string {
 	return strings.TrimSpace(basePrompt)
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 func composeRunPrompt(missionPrompt string, cyclePrompt string) string {
 	missionPrompt = strings.TrimSpace(missionPrompt)
 	cyclePrompt = strings.TrimSpace(cyclePrompt)

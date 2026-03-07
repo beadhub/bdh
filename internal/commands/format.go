@@ -13,9 +13,6 @@ type runPresenterState struct {
 func formatRunDone(event *runEvent) string {
 	parts := []string{"done"}
 	duration := event.DurationMS
-	if duration == 0 {
-		duration = event.DurationMS
-	}
 	if duration > 0 {
 		parts = append(parts, fmt.Sprintf("%.1fs", float64(duration)/1000.0))
 	}
