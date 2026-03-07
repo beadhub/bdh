@@ -50,7 +50,7 @@ func TestResolveRunSettingsPrecedence(t *testing.T) {
 		IdleWaitSeconds: &idleWait,
 	}
 
-	settings, err := resolveRunSettings(cfg, true, 7, false, "", true, 13)
+	settings, err := resolveRunSettings(cfg, true, 7, true, 13)
 	if err != nil {
 		t.Fatalf("resolveRunSettings returned error: %v", err)
 	}

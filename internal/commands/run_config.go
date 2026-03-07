@@ -54,8 +54,6 @@ func resolveRunSettings(
 	cfg runUserConfig,
 	waitFlagSet bool,
 	waitFlagValue int,
-	idlePromptFlagSet bool,
-	idlePromptFlagValue string,
 	idleWaitFlagSet bool,
 	idleWaitFlagValue int,
 ) (runResolvedSettings, error) {

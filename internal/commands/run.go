@@ -104,7 +104,6 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		settings, err := resolveRunSettings(
 			runCfg,
 			cmd.Flags().Changed("wait"), runWaitSeconds,
-			false, "",
 			cmd.Flags().Changed("idle-wait"), runIdleWait,
 		)
 		if err != nil {
