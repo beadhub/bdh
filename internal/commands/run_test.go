@@ -527,6 +527,55 @@ func TestRunLoopStopTreatsCanceledProcessExitAsNonFatal(t *testing.T) {
 	}
 }
 
+func TestRunLoopStopPrintsSinglePauseNotice(t *testing.T) {
+	controller := newFakeRunInputController()
+	runStarted := make(chan struct{})
+	var output strings.Builder
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      &output,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		control:  controller,
+		runner: func(ctx context.Context, _ string, _ []string, onLine func(string)) error {
+			close(runStarted)
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- loop.Run(context.Background(), runLoopOptions{
+			Prompt:      "keep going",
+			WaitSeconds: 0,
+			MaxRuns:     1,
+		})
+	}()
+
+	select {
+	case <-runStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for run to start")
+	}
+
+	controller.send(runControlEvent{Type: runControlStop})
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("expected graceful stop handling, got %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	text := output.String()
+	if strings.Count(text, "paused. use /resume, /quit, or type a prompt to continue.") != 1 {
+		t.Fatalf("expected exactly one pause notice after /stop, got %q", text)
+	}
+}
+
 func TestApplyControlEventStopLatchesPauseAfterRunDuringActiveRun(t *testing.T) {
 	loop := &runLoop{out: io.Discard}
 	state := &runState{}

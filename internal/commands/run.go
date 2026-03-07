@@ -61,6 +61,7 @@ type runState struct {
 	RanOnce        bool
 	RunInterrupted bool
 	PauseAfterRun  bool
+	PauseNoticeShown bool
 	StopRequested  bool
 	Paused         bool
 	NextPrompt     string
@@ -597,8 +598,9 @@ func (l *runLoop) waitForNextCycle(ctx context.Context, waitSeconds int, state *
 	if state.PauseAfterRun || state.Paused {
 		state.Paused = true
 		state.PauseAfterRun = false
-		if !state.PendingInput {
+		if !state.PendingInput && !state.PauseNoticeShown {
 			l.println("paused. use /resume, /quit, or type a prompt to continue.")
+			state.PauseNoticeShown = true
 		}
 		return l.waitWhilePaused(ctx, state)
 	}
@@ -713,6 +715,7 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		state.InputBuffer = ""
 		state.NextPrompt = strings.TrimSpace(event.Text)
 		state.Paused = false
+		state.PauseNoticeShown = false
 		if activeRun {
 			l.printf("\nqueued prompt override: %s\n", truncateRunText(state.NextPrompt, 80))
 		}
@@ -726,11 +729,13 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 			l.println("\nwill pause after this run.")
 		} else {
 			l.println("paused. use /resume, /quit, or type a prompt to continue.")
+			state.PauseNoticeShown = true
 		}
 	case runControlResume:
 		state.PendingInput = false
 		state.InputBuffer = ""
 		state.Paused = false
+		state.PauseNoticeShown = false
 		if activeRun {
 			state.PauseAfterRun = false
 		}
@@ -740,6 +745,7 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		state.InputBuffer = ""
 		state.StopRequested = true
 		state.Paused = false
+		state.PauseNoticeShown = false
 		state.PauseAfterRun = false
 		if activeRun && cancel != nil {
 			l.println("\nquitting.")
@@ -754,10 +760,12 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		if activeRun && cancel != nil {
 			state.RunInterrupted = true
 			l.println("\nstopped current run. paused. use /resume, /quit, or type a prompt to continue.")
+			state.PauseNoticeShown = true
 			cancel()
 			return
 		}
 		l.println("paused. use /resume, /quit, or type a prompt to continue.")
+		state.PauseNoticeShown = true
 	}
 }
 
