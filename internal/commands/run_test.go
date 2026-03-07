@@ -154,6 +154,9 @@ func TestRunLoopFormatsOutput(t *testing.T) {
 	if !strings.Contains(text, "Thinking...") {
 		t.Fatalf("expected streamed text, got: %q", text)
 	}
+	if !strings.Contains(text, "Thinking...\n\n- exec_command(\"pwd\")") {
+		t.Fatalf("expected blank line between text and tool block, got: %q", text)
+	}
 	if !strings.Contains(text, `- exec_command("pwd")`) {
 		t.Fatalf("expected tool call output, got: %q", text)
 	}
@@ -162,6 +165,37 @@ func TestRunLoopFormatsOutput(t *testing.T) {
 	}
 	if !strings.Contains(text, "done  2.1s  $0.0015") {
 		t.Fatalf("expected completion output, got: %q", text)
+	}
+}
+
+func TestRunLoopAddsBlankLineBetweenStructuredOutputAndText(t *testing.T) {
+	var output strings.Builder
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) },
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		out:      &output,
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+			onLine(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"pwd"}}]}}`)
+			onLine(`{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"Done reading."}}}`)
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		Prompt:      "inspect workspace",
+		MaxRuns:     1,
+		WaitSeconds: 0,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	text := output.String()
+	if !strings.Contains(text, "- Bash(\"pwd\")\n\nDone reading.") {
+		t.Fatalf("expected blank line between tool block and text, got: %q", text)
 	}
 }
 

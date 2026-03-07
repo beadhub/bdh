@@ -393,11 +393,11 @@ func (l *runLoop) drainPendingControlEvents(state *runState) {
 func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, state *runState) {
 	event, err := l.provider.ParseOutput(line)
 	if err != nil {
-		if presenter.lastWasText {
-			l.println("")
-			presenter.lastWasText = false
-		}
+		l.runPresenterEnsureTextSpacing(presenter)
 		l.println(line)
+		presenter.lastWasStructured = false
+		presenter.lastWasText = false
+		presenter.lastTextEndedWithNewline = true
 		return
 	}
 
@@ -410,46 +410,66 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 		if l.shouldSuppressText(state, event.Text) {
 			return
 		}
+		l.runPresenterEnsureTextSpacing(presenter)
 		l.print(event.Text)
 		presenter.lastWasText = true
+		presenter.lastWasStructured = false
+		presenter.lastTextEndedWithNewline = strings.HasSuffix(event.Text, "\n")
 	case runEventToolCall:
 		state.StructuredOut = true
-		if presenter.lastWasText {
-			l.println("")
-			presenter.lastWasText = false
-		}
+		l.runPresenterEnsureStructuredSpacing(presenter)
 		for _, call := range event.ToolCalls {
 			for _, line := range formatRunToolCallLines(call) {
 				l.printf("%s\n", line)
 			}
 		}
+		presenter.lastWasStructured = true
 	case runEventToolResult:
 		state.StructuredOut = true
-		if presenter.lastWasText {
-			l.println("")
-			presenter.lastWasText = false
-		}
+		l.runPresenterEnsureStructuredSpacing(presenter)
 		if text := strings.TrimSpace(event.Text); text != "" {
 			l.printf("  -> %s\n", truncateRunText(text, 150))
 		}
+		presenter.lastWasStructured = true
 	case runEventDone:
 		state.StructuredOut = true
-		if presenter.lastWasText {
-			l.println("")
-			presenter.lastWasText = false
-		}
+		l.runPresenterEnsureStructuredSpacing(presenter)
 		l.printf("%s\n", formatRunDone(event))
+		presenter.lastWasStructured = true
 	case runEventSystem:
 		state.StructuredOut = true
-		if presenter.lastWasText {
-			l.println("")
-			presenter.lastWasText = false
-		}
+		l.runPresenterEnsureStructuredSpacing(presenter)
 		if text := strings.TrimSpace(event.Text); text != "" {
 			l.printf("info: %s\n", text)
 		}
+		presenter.lastWasStructured = true
 	}
 	l.renderInputPrompt(state)
+}
+
+func (l *runLoop) runPresenterEnsureTextSpacing(presenter *runPresenterState) {
+	if presenter == nil {
+		return
+	}
+	if presenter.lastWasStructured {
+		l.print("\n")
+		presenter.lastWasStructured = false
+	}
+}
+
+func (l *runLoop) runPresenterEnsureStructuredSpacing(presenter *runPresenterState) {
+	if presenter == nil {
+		return
+	}
+	if presenter.lastWasText {
+		if presenter.lastTextEndedWithNewline {
+			l.print("\n")
+		} else {
+			l.print("\n\n")
+		}
+		presenter.lastWasText = false
+		presenter.lastTextEndedWithNewline = false
+	}
 }
 
 func (l *runLoop) shouldSuppressText(state *runState, text string) bool {

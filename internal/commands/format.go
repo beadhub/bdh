@@ -7,7 +7,9 @@ import (
 )
 
 type runPresenterState struct {
-	lastWasText bool
+	lastWasText              bool
+	lastWasStructured        bool
+	lastTextEndedWithNewline bool
 }
 
 func formatRunDone(event *runEvent) string {
