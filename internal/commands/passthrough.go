@@ -342,26 +342,28 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 				result.Rejected = true
 				result.RejectionReason = cmdResp.Reason
 			}
-		} else if isCloseCommandFromArgs(cleanArgs) {
-			// For close commands, check if other agents have claims on this bead
+		} else if isCloseCommandFromArgs(cleanArgs) || isClaimCommandFromArgs(cleanArgs) {
+			// For close and claim commands, check if other agents have claims on this bead
 			beadID := extractBeadIDFromArgs(cleanArgs)
 			if beadID != "" && cmdResp.Context != nil {
 				otherClaimants := hasOtherClaimants(beadID, cfg.WorkspaceID, cmdResp.Context.BeadsInProgress)
 				if len(otherClaimants) > 0 {
 					if hasJumpIn {
-						// --:jump-in allows closing, notify others
 						notifyBeadID = beadID
 						notifyAgents = otherClaimants
 					} else {
-						// Require --:jump-in to close when others are working
 						result.Rejected = true
 						var names []string
 						for _, c := range otherClaimants {
 							names = append(names, fmt.Sprintf("%s (%s)", c.Alias, c.HumanName))
 						}
+						action := "close"
+						if isClaimCommandFromArgs(cleanArgs) {
+							action = "claim"
+						}
 						result.RejectionReason = fmt.Sprintf(
-							"%s has active claims by: %s. Use --:jump-in \"reason\" to close anyway and notify them.",
-							beadID, strings.Join(names, ", "))
+							"%s has active claims by: %s. Use --:jump-in \"reason\" to %s anyway and notify them.",
+							beadID, strings.Join(names, ", "), action)
 						result.BeadsInProgress = cmdResp.Context.BeadsInProgress
 					}
 				}
@@ -714,6 +716,23 @@ func findRelatedWorkInProgress(closedBeadID, myWorkspaceID string, beadsInProgre
 // isCloseCommandFromArgs checks if args represent a close command.
 func isCloseCommandFromArgs(args []string) bool {
 	return len(args) >= 1 && args[0] == "close"
+}
+
+// isClaimCommandFromArgs checks if args represent a claim operation:
+// "update <id> --claim" or "update <id> --status in_progress".
+func isClaimCommandFromArgs(args []string) bool {
+	if len(args) < 2 || args[0] != "update" {
+		return false
+	}
+	for i, arg := range args {
+		if arg == "--claim" {
+			return true
+		}
+		if arg == "--status" && i+1 < len(args) && args[i+1] == "in_progress" {
+			return true
+		}
+	}
+	return false
 }
 
 // isWorkspaceRecentlyActive checks if a workspace was active after the given threshold.
