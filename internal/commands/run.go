@@ -141,7 +141,7 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		inputPromptLabel := defaultRunInputPromptLabel
 		cfg, cfgErr := loadAndValidateConfig()
 		if cfgErr == nil {
-			inputPromptLabel = runIdentityPromptLabel(cfg.ProjectSlug, cfg.Alias)
+			inputPromptLabel = runIdentityPromptLabel(cfg.ProjectSlug, cfg.CanonicalOrigin, cfg.RepoOrigin, cfg.Alias)
 			if aw, awErr := newAwebClientRequired(cfg.BeadhubURL); awErr == nil {
 				dispatcher = newBeadhubRunDispatcher(cfg, aw, dispatchDefaults)
 			}
@@ -706,6 +706,9 @@ func (l *runLoop) renderInputPrompt(state *runState) {
 	if state == nil {
 		return
 	}
+	if l.screen != nil && l.screen.hasActiveProgram() {
+		return
+	}
 	if !state.PendingInput && !state.Paused && state.InputBuffer == "" {
 		if l.screen != nil {
 			l.screen.SetInputLine(l.promptLabel())
@@ -735,13 +738,37 @@ func (l *runLoop) promptLabel() string {
 	return l.inputPromptLabel
 }
 
-func runIdentityPromptLabel(projectSlug string, alias string) string {
+func runIdentityPromptLabel(projectSlug string, canonicalOrigin string, repoOrigin string, alias string) string {
 	projectSlug = strings.TrimSpace(projectSlug)
+	shortRepo := runShortRepoName(canonicalOrigin, repoOrigin)
 	alias = strings.TrimSpace(alias)
 	if projectSlug == "" || alias == "" {
 		return defaultRunInputPromptLabel
 	}
-	return projectSlug + ":" + alias + "> "
+	if shortRepo == "" {
+		return projectSlug + ":" + alias + "> "
+	}
+	return projectSlug + ":" + shortRepo + ":" + alias + "> "
+}
+
+func runShortRepoName(canonicalOrigin string, repoOrigin string) string {
+	for _, candidate := range []string{canonicalOrigin, repoOrigin} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		candidate = strings.TrimSuffix(candidate, ".git")
+		candidate = strings.TrimSuffix(candidate, "/")
+		candidate = strings.TrimSuffix(candidate, ":")
+		candidate = strings.ReplaceAll(candidate, "\\", "/")
+		if idx := strings.LastIndex(candidate, "/"); idx >= 0 && idx < len(candidate)-1 {
+			return candidate[idx+1:]
+		}
+		if idx := strings.LastIndex(candidate, ":"); idx >= 0 && idx < len(candidate)-1 {
+			return candidate[idx+1:]
+		}
+	}
+	return ""
 }
 
 func (l *runLoop) renderIdleLine(label string, remaining int, state *runState) {

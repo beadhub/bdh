@@ -233,6 +233,15 @@ func (s *runScreenManager) ClearInputLine() {
 	s.SetInputLine(s.promptLabel)
 }
 
+func (s *runScreenManager) hasActiveProgram() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.program != nil
+}
+
 func (s *runScreenManager) snapshotLocked() runScreenSnapshot {
 	lines := make([]string, len(s.lines))
 	copy(lines, s.lines)
@@ -312,16 +321,16 @@ func newRunScreenModel(
 
 func newRunScreenStyles() runScreenStyles {
 	return runScreenStyles{
-		runHeader: lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true),
-		tool:      lipgloss.NewStyle().Foreground(lipgloss.Color("11")),
-		result:    lipgloss.NewStyle().Foreground(lipgloss.Color("14")),
-		done:      lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true),
-		info:      lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+		runHeader: lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "24", Dark: "12"}).Bold(true),
+		tool:      lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "18", Dark: "11"}),
+		result:    lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "23", Dark: "14"}),
+		done:      lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "10"}).Bold(true),
+		info:      lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "8"}),
 		status: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")).
-			Background(lipgloss.Color("236")).
+			Foreground(lipgloss.AdaptiveColor{Light: "236", Dark: "252"}).
+			Background(lipgloss.AdaptiveColor{Light: "252", Dark: "236"}).
 			Padding(0, 1),
-		hint: lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+		hint: lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "8"}),
 	}
 }
 
