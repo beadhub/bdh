@@ -43,6 +43,38 @@ func TestInitRunUserConfigWritesConfig(t *testing.T) {
 	}
 }
 
+func TestInitRunUserConfigSeedsSuggestedDefaultsWhenUnset(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	input := strings.NewReader("\n\n\n\n\n")
+	var output bytes.Buffer
+
+	if err := initRunUserConfig(input, &output, runUserConfig{}); err != nil {
+		t.Fatalf("initRunUserConfig returned error: %v", err)
+	}
+
+	cfg, err := loadRunUserConfig()
+	if err != nil {
+		t.Fatalf("loadRunUserConfig returned error: %v", err)
+	}
+	if cfg.BasePrompt == nil || *cfg.BasePrompt != defaultRunInitBasePrompt {
+		t.Fatalf("expected suggested base prompt, got %#v", cfg.BasePrompt)
+	}
+	if cfg.WorkPromptSuffix == nil || *cfg.WorkPromptSuffix != defaultRunWorkPromptSuffix {
+		t.Fatalf("expected default work suffix, got %#v", cfg.WorkPromptSuffix)
+	}
+	if cfg.CommsPromptSuffix == nil || *cfg.CommsPromptSuffix != defaultRunInitCommsSuffix {
+		t.Fatalf("expected suggested comms suffix, got %#v", cfg.CommsPromptSuffix)
+	}
+	if cfg.WaitSeconds == nil || *cfg.WaitSeconds != defaultRunWaitSeconds {
+		t.Fatalf("expected default wait_seconds, got %#v", cfg.WaitSeconds)
+	}
+	if cfg.IdleWaitSeconds == nil || *cfg.IdleWaitSeconds != defaultRunIdleWaitSeconds {
+		t.Fatalf("expected default idle_wait_seconds, got %#v", cfg.IdleWaitSeconds)
+	}
+}
+
 func TestPromptRunConfigStringClearsOnDash(t *testing.T) {
 	reader := strings.NewReader("-\n")
 	var output bytes.Buffer
