@@ -8,18 +8,27 @@ import (
 )
 
 const (
-	defaultRunWaitSeconds     = 20
-	defaultRunIdleWaitSeconds = 30
+	defaultRunWaitSeconds       = 20
+	defaultRunIdleWaitSeconds   = 30
+	defaultRunBasePrompt        = ""
+	defaultRunWorkPromptSuffix  = "Before closing the bead, run a self-review or code-reviewer pass on your changes."
+	defaultRunCommsPromptSuffix = ""
 )
 
 type runUserConfig struct {
-	WaitSeconds     *int `json:"wait_seconds"`
-	IdleWaitSeconds *int `json:"idle_wait_seconds"`
+	BasePrompt        *string `json:"base_prompt"`
+	WorkPromptSuffix  *string `json:"work_prompt_suffix"`
+	CommsPromptSuffix *string `json:"comms_prompt_suffix"`
+	WaitSeconds       *int    `json:"wait_seconds"`
+	IdleWaitSeconds   *int    `json:"idle_wait_seconds"`
 }
 
 type runResolvedSettings struct {
-	WaitSeconds     int
-	IdleWaitSeconds int
+	BasePrompt        string
+	WorkPromptSuffix  string
+	CommsPromptSuffix string
+	WaitSeconds       int
+	IdleWaitSeconds   int
 }
 
 func loadRunUserConfig() (runUserConfig, error) {
@@ -58,10 +67,22 @@ func resolveRunSettings(
 	idleWaitFlagValue int,
 ) (runResolvedSettings, error) {
 	settings := runResolvedSettings{
-		WaitSeconds:     defaultRunWaitSeconds,
-		IdleWaitSeconds: defaultRunIdleWaitSeconds,
+		BasePrompt:        defaultRunBasePrompt,
+		WorkPromptSuffix:  defaultRunWorkPromptSuffix,
+		CommsPromptSuffix: defaultRunCommsPromptSuffix,
+		WaitSeconds:       defaultRunWaitSeconds,
+		IdleWaitSeconds:   defaultRunIdleWaitSeconds,
 	}
 
+	if cfg.BasePrompt != nil {
+		settings.BasePrompt = *cfg.BasePrompt
+	}
+	if cfg.WorkPromptSuffix != nil {
+		settings.WorkPromptSuffix = *cfg.WorkPromptSuffix
+	}
+	if cfg.CommsPromptSuffix != nil {
+		settings.CommsPromptSuffix = *cfg.CommsPromptSuffix
+	}
 	if cfg.WaitSeconds != nil {
 		settings.WaitSeconds = *cfg.WaitSeconds
 	}

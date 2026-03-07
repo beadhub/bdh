@@ -52,8 +52,12 @@ type runReadyTask struct {
 }
 
 type runDispatchDefaults struct {
-	IdleWaitSeconds int
-	IgnoreBeads     bool
+	IdleWaitSeconds      int
+	IgnoreBeads          bool
+	WorkPromptSuffix     string
+	CommsPromptSuffix    string
+	HasWorkPromptSuffix  bool
+	HasCommsPromptSuffix bool
 }
 
 const (
@@ -159,6 +163,12 @@ func withRunDispatchDefaults(defaults runDispatchDefaults) runDispatchDefaults {
 	if defaults.IdleWaitSeconds == 0 {
 		defaults.IdleWaitSeconds = defaultRunIdleWaitSeconds
 	}
+	if !defaults.HasWorkPromptSuffix {
+		defaults.WorkPromptSuffix = defaultRunWorkPromptSuffix
+	}
+	if !defaults.HasCommsPromptSuffix {
+		defaults.CommsPromptSuffix = defaultRunCommsPromptSuffix
+	}
 	return defaults
 }
 
@@ -168,22 +178,22 @@ func selectRunDispatch(summary runDispatchSummary, defaults runDispatchDefaults)
 	switch {
 	case summary.PendingChat != nil:
 		return runDispatchDecision{
-			Prompt:      buildPendingChatPrompt(*summary.PendingChat),
+			Prompt:      appendRunPromptSuffix(buildPendingChatPrompt(*summary.PendingChat), defaults.CommsPromptSuffix),
 			WaitSeconds: 5,
 		}
 	case len(summary.UnreadMail) > 0:
 		return runDispatchDecision{
-			Prompt:      buildUnreadMailPrompt(summary.UnreadMail),
+			Prompt:      appendRunPromptSuffix(buildUnreadMailPrompt(summary.UnreadMail), defaults.CommsPromptSuffix),
 			WaitSeconds: 5,
 		}
 	case !defaults.IgnoreBeads && summary.CurrentClaim != nil:
 		return runDispatchDecision{
-			Prompt:      buildClaimPrompt(*summary.CurrentClaim),
+			Prompt:      appendRunPromptSuffix(buildClaimPrompt(*summary.CurrentClaim), defaults.WorkPromptSuffix),
 			WaitSeconds: 20,
 		}
 	case !defaults.IgnoreBeads && summary.ReadyTask != nil:
 		return runDispatchDecision{
-			Prompt:      buildReadyTaskPrompt(*summary.ReadyTask),
+			Prompt:      appendRunPromptSuffix(buildReadyTaskPrompt(*summary.ReadyTask), defaults.WorkPromptSuffix),
 			WaitSeconds: 20,
 		}
 	default:
@@ -197,17 +207,17 @@ func selectRunDispatch(summary runDispatchSummary, defaults runDispatchDefaults)
 func buildClaimPrompt(claim ClaimInfo) string {
 	title := strings.TrimSpace(claim.Title)
 	if title == "" {
-		return fmt.Sprintf("Continue working on %s. Before closing the bead, run a self-review or code-reviewer pass on your changes.", claim.BeadID)
+		return fmt.Sprintf("Continue working on %s.", claim.BeadID)
 	}
-	return fmt.Sprintf("Continue working on %s: %s. Before closing the bead, run a self-review or code-reviewer pass on your changes.", claim.BeadID, title)
+	return fmt.Sprintf("Continue working on %s: %s.", claim.BeadID, title)
 }
 
 func buildReadyTaskPrompt(task runReadyTask) string {
 	title := strings.TrimSpace(task.Title)
 	if title == "" {
-		return fmt.Sprintf("Pick up %s if it is still appropriate, work on it, and before closing the bead run a self-review or code-reviewer pass on your changes.", task.ID)
+		return fmt.Sprintf("Pick up %s if it is still appropriate, then work on it.", task.ID)
 	}
-	return fmt.Sprintf("Pick up %s: %s. Claim it if appropriate, work on it, and before closing the bead run a self-review or code-reviewer pass on your changes.", task.ID, title)
+	return fmt.Sprintf("Pick up %s: %s. Claim it if appropriate, then work on it.", task.ID, title)
 }
 
 func buildRunCommsMessages(messages []aweb.ChatMessage) []runCommsMessage {
@@ -284,4 +294,16 @@ func truncateRunDispatchBody(text string) string {
 		return text
 	}
 	return strings.TrimSpace(text[:runDispatchBodyLimit]) + "..."
+}
+
+func appendRunPromptSuffix(prompt string, suffix string) string {
+	prompt = strings.TrimSpace(prompt)
+	suffix = strings.TrimSpace(suffix)
+	if prompt == "" {
+		return suffix
+	}
+	if suffix == "" {
+		return prompt
+	}
+	return prompt + "\n\n" + suffix
 }

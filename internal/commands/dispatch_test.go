@@ -91,6 +91,46 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 	}
 }
 
+func TestSelectRunDispatchUsesConfiguredSuffixes(t *testing.T) {
+	defaults := withRunDispatchDefaults(runDispatchDefaults{
+		WorkPromptSuffix:     "custom work suffix",
+		CommsPromptSuffix:    "custom comms suffix",
+		HasWorkPromptSuffix:  true,
+		HasCommsPromptSuffix: true,
+	})
+	claim := ClaimInfo{BeadID: "bdh-421.3", Title: "Dispatch logic"}
+
+	workDecision := selectRunDispatch(runDispatchSummary{CurrentClaim: &claim}, defaults)
+	if !containsText(workDecision.Prompt, "custom work suffix") {
+		t.Fatalf("expected work suffix in prompt, got %q", workDecision.Prompt)
+	}
+
+	commsDecision := selectRunDispatch(runDispatchSummary{
+		PendingChat: &runPendingChat{
+			Alias: "grace",
+			Messages: []runCommsMessage{
+				{From: "grace", Body: "Please validate the latest run behavior."},
+			},
+		},
+	}, defaults)
+	if !containsText(commsDecision.Prompt, "custom comms suffix") {
+		t.Fatalf("expected comms suffix in prompt, got %q", commsDecision.Prompt)
+	}
+}
+
+func TestSelectRunDispatchAllowsEmptyConfiguredWorkSuffix(t *testing.T) {
+	defaults := withRunDispatchDefaults(runDispatchDefaults{
+		WorkPromptSuffix:    "",
+		HasWorkPromptSuffix: true,
+	})
+	claim := ClaimInfo{BeadID: "bdh-421.3", Title: "Dispatch logic"}
+
+	decision := selectRunDispatch(runDispatchSummary{CurrentClaim: &claim}, defaults)
+	if containsText(decision.Prompt, "code-reviewer pass") {
+		t.Fatalf("expected empty configured work suffix to suppress default reminder, got %q", decision.Prompt)
+	}
+}
+
 func TestSelectRunDispatchIgnoreBeadsSkipsClaimAndReadyWork(t *testing.T) {
 	defaults := withRunDispatchDefaults(runDispatchDefaults{IgnoreBeads: true, IdleWaitSeconds: 17})
 	claim := ClaimInfo{BeadID: "bdh-421.3", Title: "Dispatch logic"}

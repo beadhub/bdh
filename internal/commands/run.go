@@ -117,8 +117,12 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		}
 
 		dispatchDefaults := runDispatchDefaults{
-			IdleWaitSeconds: settings.IdleWaitSeconds,
-			IgnoreBeads:     runIgnoreBeads,
+			IdleWaitSeconds:      settings.IdleWaitSeconds,
+			IgnoreBeads:          runIgnoreBeads,
+			WorkPromptSuffix:     settings.WorkPromptSuffix,
+			CommsPromptSuffix:    settings.CommsPromptSuffix,
+			HasWorkPromptSuffix:  true,
+			HasCommsPromptSuffix: true,
 		}
 
 		var dispatcher runDispatcher
@@ -147,7 +151,7 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		}
 
 		opts := runLoopOptions{
-			Prompt:       strings.Join(args, " "),
+			Prompt:       firstNonEmpty(strings.Join(args, " "), settings.BasePrompt),
 			WaitSeconds:  settings.WaitSeconds,
 			MaxRuns:      runMaxRuns,
 			SessionMode:  runSessionMode,
@@ -713,6 +717,15 @@ func resolveRunMissionPrompt(basePrompt string, overridePrompt string) string {
 		return overridePrompt
 	}
 	return strings.TrimSpace(basePrompt)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func composeRunPrompt(missionPrompt string, cyclePrompt string) string {

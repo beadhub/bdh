@@ -187,6 +187,13 @@ func TestResolveRunMissionPromptPrefersOneRunOverride(t *testing.T) {
 	}
 }
 
+func TestFirstNonEmptyPrefersFirstNonBlankValue(t *testing.T) {
+	got := firstNonEmpty("", "  ", "config base", "fallback")
+	if got != "config base" {
+		t.Fatalf("expected first non-blank value, got %q", got)
+	}
+}
+
 func TestRunLoopIdleCountdown(t *testing.T) {
 	var slept []time.Duration
 	var output strings.Builder
