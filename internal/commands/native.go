@@ -69,7 +69,8 @@ func (e *nativePartialError) Error() string { return e.msg }
 
 // runNative executes a command in native mode using the aweb /v1/tasks API.
 // This is called when bd is not initialized in the workspace.
-func runNative(aw *aweb.Client, args []string) (*bd.Result, error) {
+// claimedByOthers contains bead IDs claimed by other agents, used to filter ready results.
+func runNative(aw *aweb.Client, args []string, claimedByOthers map[string]bool) (*bd.Result, error) {
 	jsonMode := hasFlag(args, "--json")
 
 	cmd, remaining, err := parseNativeCommand(args)
@@ -97,7 +98,7 @@ func runNative(aw *aweb.Client, args []string) (*bd.Result, error) {
 	case "close":
 		output, err = nativeClose(ctx, aw, remaining, jsonMode)
 	case "ready":
-		output, err = nativeReady(ctx, aw, jsonMode)
+		output, err = nativeReady(ctx, aw, jsonMode, claimedByOthers)
 	case "blocked":
 		output, err = nativeBlocked(ctx, aw, jsonMode)
 	case "dep":
@@ -545,10 +546,20 @@ func nativeDelete(ctx context.Context, aw *aweb.Client, args []string, jsonMode 
 	return fmt.Sprintf("✓ Deleted %s\n", ref), nil
 }
 
-func nativeReady(ctx context.Context, aw *aweb.Client, jsonMode bool) (string, error) {
+func nativeReady(ctx context.Context, aw *aweb.Client, jsonMode bool, claimedByOthers map[string]bool) (string, error) {
 	resp, err := aw.TaskListReady(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing ready tasks: %w", err)
+	}
+
+	if len(claimedByOthers) > 0 {
+		filtered := make([]aweb.TaskSummary, 0, len(resp.Tasks))
+		for _, t := range resp.Tasks {
+			if !claimedByOthers[t.TaskRef] {
+				filtered = append(filtered, t)
+			}
+		}
+		resp.Tasks = filtered
 	}
 
 	if jsonMode {

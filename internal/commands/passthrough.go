@@ -496,7 +496,7 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 		if nativeErr != nil {
 			return nil, fmt.Errorf("native mode requires authentication — %w", nativeErr)
 		}
-		nativeResult, err := runNative(nativeAw, cleanArgs)
+		nativeResult, err := runNative(nativeAw, cleanArgs, claimedByOtherWorkspaces(cfg.WorkspaceID, result.BeadsInProgress))
 		if err != nil {
 			return nil, fmt.Errorf("native mode: %w", err)
 		}
@@ -768,6 +768,20 @@ func isWorkspaceRecentlyActive(ws client.Workspace, threshold time.Time) bool {
 
 	// If we can't parse any timestamp, include the workspace (conservative approach)
 	return true
+}
+
+// claimedByOtherWorkspaces returns bead IDs claimed by workspaces other than mine.
+func claimedByOtherWorkspaces(myWorkspaceID string, beadsInProgress []client.BeadInProgress) map[string]bool {
+	if len(beadsInProgress) == 0 {
+		return nil
+	}
+	claimed := make(map[string]bool)
+	for _, bip := range beadsInProgress {
+		if bip.WorkspaceID != myWorkspaceID {
+			claimed[bip.BeadID] = true
+		}
+	}
+	return claimed
 }
 
 // hasOtherClaimants checks if the bead has claims from other workspaces.

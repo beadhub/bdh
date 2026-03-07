@@ -171,7 +171,7 @@ func TestNativeCreate(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"create", "--title", "My new task", "--type", "task", "--priority", "2"})
+	result, err := runNative(client, []string{"create", "--title", "My new task", "--type", "task", "--priority", "2"}, nil)
 	if err != nil {
 		t.Fatalf("runNative create: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestNativeCreate(t *testing.T) {
 func TestNativeCreate_RequiresTitle(t *testing.T) {
 	_, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {})
 
-	result, err := runNative(client, []string{"create"})
+	result, err := runNative(client, []string{"create"}, nil)
 	if err != nil {
 		t.Fatalf("runNative create: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestNativeList(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"list", "--status=open"})
+	result, err := runNative(client, []string{"list", "--status=open"}, nil)
 	if err != nil {
 		t.Fatalf("runNative list: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestNativeList_Empty(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"list"})
+	result, err := runNative(client, []string{"list"}, nil)
 	if err != nil {
 		t.Fatalf("runNative list: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestNativeShow(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"show", "bdh-001"})
+	result, err := runNative(client, []string{"show", "bdh-001"}, nil)
 	if err != nil {
 		t.Fatalf("runNative show: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestNativeClose_Multiple(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"close", "bdh-001", "bdh-002"})
+	result, err := runNative(client, []string{"close", "bdh-001", "bdh-002"}, nil)
 	if err != nil {
 		t.Fatalf("runNative close: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestNativeReady(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"ready"})
+	result, err := runNative(client, []string{"ready"}, nil)
 	if err != nil {
 		t.Fatalf("runNative ready: %v", err)
 	}
@@ -349,10 +349,45 @@ func TestNativeReady(t *testing.T) {
 	}
 }
 
+func TestNativeReady_FiltersClaimedByOtherAgents(t *testing.T) {
+	server, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/tasks/ready" && r.Method == "GET" {
+			json.NewEncoder(w).Encode(aweb.TaskListResponse{
+				Tasks: []aweb.TaskSummary{
+					{TaskRef: "bdh-010", Title: "My task", Priority: 1, TaskType: "task"},
+					{TaskRef: "bdh-020", Title: "Alice's task", Priority: 2, TaskType: "feature"},
+					{TaskRef: "bdh-030", Title: "Unclaimed task", Priority: 3, TaskType: "task"},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	defer server.Close()
+
+	claimed := map[string]bool{"bdh-020": true}
+	result, err := runNative(client, []string{"ready"}, claimed)
+	if err != nil {
+		t.Fatalf("runNative ready: %v", err)
+	}
+	if strings.Contains(result.Stdout, "bdh-020") {
+		t.Errorf("expected bdh-020 to be filtered out, got: %q", result.Stdout)
+	}
+	if !strings.Contains(result.Stdout, "bdh-010") {
+		t.Errorf("expected bdh-010 to remain, got: %q", result.Stdout)
+	}
+	if !strings.Contains(result.Stdout, "bdh-030") {
+		t.Errorf("expected bdh-030 to remain, got: %q", result.Stdout)
+	}
+	if !strings.Contains(result.Stdout, "2 issues") {
+		t.Errorf("expected count to reflect filtered list, got: %q", result.Stdout)
+	}
+}
+
 func TestNativeSync_NoOp(t *testing.T) {
 	_, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {})
 
-	result, err := runNative(client, []string{"sync"})
+	result, err := runNative(client, []string{"sync"}, nil)
 	if err != nil {
 		t.Fatalf("runNative sync: %v", err)
 	}
@@ -376,7 +411,7 @@ func TestNativeDep_Add(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"dep", "add", "bdh-002", "bdh-001"})
+	result, err := runNative(client, []string{"dep", "add", "bdh-002", "bdh-001"}, nil)
 	if err != nil {
 		t.Fatalf("runNative dep add: %v", err)
 	}
@@ -404,7 +439,7 @@ func TestNativeUpdate(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"update", "bdh-001", "--status", "in_progress"})
+	result, err := runNative(client, []string{"update", "bdh-001", "--status", "in_progress"}, nil)
 	if err != nil {
 		t.Fatalf("runNative update: %v", err)
 	}
@@ -419,7 +454,7 @@ func TestNativeUpdate(t *testing.T) {
 func TestNativeUpdate_NoFields(t *testing.T) {
 	_, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {})
 
-	result, err := runNative(client, []string{"update", "bdh-001"})
+	result, err := runNative(client, []string{"update", "bdh-001"}, nil)
 	if err != nil {
 		t.Fatalf("runNative update: %v", err)
 	}
@@ -441,7 +476,7 @@ func TestNativeReopen(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"reopen", "bdh-001"})
+	result, err := runNative(client, []string{"reopen", "bdh-001"}, nil)
 	if err != nil {
 		t.Fatalf("runNative reopen: %v", err)
 	}
@@ -467,7 +502,7 @@ func TestNativeStats(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"stats"})
+	result, err := runNative(client, []string{"stats"}, nil)
 	if err != nil {
 		t.Fatalf("runNative stats: %v", err)
 	}
@@ -499,7 +534,7 @@ func TestNativeBlocked(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"blocked"})
+	result, err := runNative(client, []string{"blocked"}, nil)
 	if err != nil {
 		t.Fatalf("runNative blocked: %v", err)
 	}
@@ -521,7 +556,7 @@ func TestNativeBlocked_Empty(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"blocked"})
+	result, err := runNative(client, []string{"blocked"}, nil)
 	if err != nil {
 		t.Fatalf("runNative blocked: %v", err)
 	}
@@ -545,7 +580,7 @@ func TestNativeUpdate_HeldError(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"update", "bdh-001", "--status", "in_progress"})
+	result, err := runNative(client, []string{"update", "bdh-001", "--status", "in_progress"}, nil)
 	if err != nil {
 		t.Fatalf("runNative update: %v", err)
 	}
@@ -692,7 +727,7 @@ func TestNativeClose_AllFail_ExitCode(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"close", "bdh-999"})
+	result, err := runNative(client, []string{"close", "bdh-999"}, nil)
 	if err != nil {
 		t.Fatalf("runNative close: %v", err)
 	}
@@ -718,7 +753,7 @@ func TestNativeReopen_HeldError(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"reopen", "bdh-001"})
+	result, err := runNative(client, []string{"reopen", "bdh-001"}, nil)
 	if err != nil {
 		t.Fatalf("runNative reopen: %v", err)
 	}
@@ -734,7 +769,7 @@ func TestNativeSync_Message(t *testing.T) {
 	// SUG-3: sync in native mode should output an explanatory message
 	_, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {})
 
-	result, err := runNative(client, []string{"sync"})
+	result, err := runNative(client, []string{"sync"}, nil)
 	if err != nil {
 		t.Fatalf("runNative sync: %v", err)
 	}
@@ -791,7 +826,7 @@ func TestNativeClose_PartialFailure_ExitCode(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"close", "bdh-001", "bdh-bad"})
+	result, err := runNative(client, []string{"close", "bdh-001", "bdh-bad"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -821,7 +856,7 @@ func TestNativeCreate_DefaultPriority(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"create", "--title", "Test"})
+	result, err := runNative(client, []string{"create", "--title", "Test"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -854,7 +889,7 @@ func TestNativeClose_PartialFailure_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"close", "bdh-001", "bdh-bad", "--json"})
+	result, err := runNative(client, []string{"close", "bdh-001", "bdh-bad", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -900,7 +935,7 @@ func TestNativeClose_AllFail_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"close", "bdh-999", "--json"})
+	result, err := runNative(client, []string{"close", "bdh-999", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -937,7 +972,7 @@ func TestNativeUpdate_Labels(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"update", "bdh-001", "--labels", "frontend,urgent"})
+	result, err := runNative(client, []string{"update", "bdh-001", "--labels", "frontend,urgent"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -966,7 +1001,7 @@ func TestNativeCreate_Assignee(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"create", "--title", "Test", "--assignee", "agent-abc"})
+	result, err := runNative(client, []string{"create", "--title", "Test", "--assignee", "agent-abc"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -991,7 +1026,7 @@ func TestNativeCreate_InvalidPriority(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"create", "--title", "Test", "--priority", "high"})
+	result, err := runNative(client, []string{"create", "--title", "Test", "--priority", "high"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1011,7 +1046,7 @@ func TestNativeUpdate_InvalidPriority(t *testing.T) {
 	// not the generic "no fields to update" message
 	_, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {})
 
-	result, err := runNative(client, []string{"update", "bdh-001", "--priority", "high"})
+	result, err := runNative(client, []string{"update", "bdh-001", "--priority", "high"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1036,7 +1071,7 @@ func TestNativeCreate_OutOfRangePriority(t *testing.T) {
 
 	for _, p := range []string{"5", "99", "-1", "P5"} {
 		called = false
-		result, err := runNative(client, []string{"create", "--title", "Test", "--priority", p})
+		result, err := runNative(client, []string{"create", "--title", "Test", "--priority", p}, nil)
 		if err != nil {
 			t.Fatalf("priority=%s: error: %v", p, err)
 		}
@@ -1055,7 +1090,7 @@ func TestNativeCreate_OutOfRangePriority(t *testing.T) {
 func TestNativeList_InvalidPriority(t *testing.T) {
 	_, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {})
 
-	result, err := runNative(client, []string{"list", "--priority", "high"})
+	result, err := runNative(client, []string{"list", "--priority", "high"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1084,7 +1119,7 @@ func TestNativeList_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"list", "--json"})
+	result, err := runNative(client, []string{"list", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1123,7 +1158,7 @@ func TestNativeShow_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"show", "bdh-001", "--json"})
+	result, err := runNative(client, []string{"show", "bdh-001", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1158,7 +1193,7 @@ func TestNativeCreate_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"create", "--title", "New task", "--json"})
+	result, err := runNative(client, []string{"create", "--title", "New task", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1189,7 +1224,7 @@ func TestNativeReady_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"ready", "--json"})
+	result, err := runNative(client, []string{"ready", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1218,7 +1253,7 @@ func TestNativeUpdate_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"update", "bdh-001", "--status", "in_progress", "--json"})
+	result, err := runNative(client, []string{"update", "bdh-001", "--status", "in_progress", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1248,7 +1283,7 @@ func TestNativeClose_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"close", "bdh-001", "bdh-002", "--json"})
+	result, err := runNative(client, []string{"close", "bdh-001", "bdh-002", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1283,7 +1318,7 @@ func TestNativeBlocked_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"blocked", "--json"})
+	result, err := runNative(client, []string{"blocked", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1317,7 +1352,7 @@ func TestNativeStats_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"stats", "--json"})
+	result, err := runNative(client, []string{"stats", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1350,7 +1385,7 @@ func TestNativeReopen_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"reopen", "bdh-001", "--json"})
+	result, err := runNative(client, []string{"reopen", "bdh-001", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1377,7 +1412,7 @@ func TestNativeList_JSON_Empty(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"list", "--json"})
+	result, err := runNative(client, []string{"list", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1414,7 +1449,7 @@ func TestNativeList_LabelsFilter(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"list", "--labels", "frontend,urgent"})
+	result, err := runNative(client, []string{"list", "--labels", "frontend,urgent"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1455,7 +1490,7 @@ func TestNativeDep_List(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"dep", "list", "bdh-001"})
+	result, err := runNative(client, []string{"dep", "list", "bdh-001"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1484,7 +1519,7 @@ func TestNativeDep_List_NoDeps(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"dep", "list", "bdh-001"})
+	result, err := runNative(client, []string{"dep", "list", "bdh-001"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1508,7 +1543,7 @@ func TestNativeDep_List_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"dep", "list", "bdh-001", "--json"})
+	result, err := runNative(client, []string{"dep", "list", "bdh-001", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1538,7 +1573,7 @@ func TestNativeDelete(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"delete", "bdh-001"})
+	result, err := runNative(client, []string{"delete", "bdh-001"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1566,7 +1601,7 @@ func TestNativeDelete_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"delete", "bdh-001", "--json"})
+	result, err := runNative(client, []string{"delete", "bdh-001", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1586,7 +1621,7 @@ func TestNativeDelete_JSON(t *testing.T) {
 func TestNativeDelete_NoRef(t *testing.T) {
 	_, client := nativeMockServer(t, func(w http.ResponseWriter, r *http.Request) {})
 
-	result, err := runNative(client, []string{"delete"})
+	result, err := runNative(client, []string{"delete"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1611,7 +1646,7 @@ func TestNativeDep_Remove(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"dep", "remove", "bdh-001", "bdh-000"})
+	result, err := runNative(client, []string{"dep", "remove", "bdh-001", "bdh-000"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1639,7 +1674,7 @@ func TestNativeDep_Remove_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"dep", "remove", "bdh-001", "bdh-000", "--json"})
+	result, err := runNative(client, []string{"dep", "remove", "bdh-001", "bdh-000", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1669,7 +1704,7 @@ func TestNativeDep_Add_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"dep", "add", "bdh-001", "bdh-000", "--json"})
+	result, err := runNative(client, []string{"dep", "add", "bdh-001", "bdh-000", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1711,7 +1746,7 @@ func TestNativeComment_Add(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"comment", "add", "bdh-001", "This is a comment"})
+	result, err := runNative(client, []string{"comment", "add", "bdh-001", "This is a comment"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1745,7 +1780,7 @@ func TestNativeComment_List(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"comment", "list", "bdh-001"})
+	result, err := runNative(client, []string{"comment", "list", "bdh-001"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1770,7 +1805,7 @@ func TestNativeComment_List_Empty(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"comment", "list", "bdh-001"})
+	result, err := runNative(client, []string{"comment", "list", "bdh-001"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1793,7 +1828,7 @@ func TestNativeComment_List_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"comment", "list", "bdh-001", "--json"})
+	result, err := runNative(client, []string{"comment", "list", "bdh-001", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -1824,7 +1859,7 @@ func TestNativeComment_Add_JSON(t *testing.T) {
 	})
 	defer server.Close()
 
-	result, err := runNative(client, []string{"comment", "add", "bdh-001", "My comment", "--json"})
+	result, err := runNative(client, []string{"comment", "add", "bdh-001", "My comment", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
