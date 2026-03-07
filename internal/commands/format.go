@@ -13,13 +13,20 @@ type runPresenterState struct {
 }
 
 func formatRunDone(event *runEvent) string {
-	parts := []string{"done"}
+	label := "done"
+	if event != nil && event.IsError {
+		label = "error"
+	}
+	parts := []string{label}
 	duration := event.DurationMS
 	if duration > 0 {
 		parts = append(parts, fmt.Sprintf("%.1fs", float64(duration)/1000.0))
 	}
 	if event.CostUSD != nil {
 		parts = append(parts, fmt.Sprintf("$%.4f", *event.CostUSD))
+	}
+	if event != nil && event.IsError && strings.TrimSpace(event.Text) != "" {
+		parts = append(parts, truncateRunText(event.Text, 160))
 	}
 	return strings.Join(parts, "  ")
 }

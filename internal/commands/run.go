@@ -68,6 +68,7 @@ type runState struct {
 	TextProbe      string
 	SuppressText   bool
 	StructuredOut  bool
+	LastRunError   string
 }
 
 var (
@@ -327,6 +328,7 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 }
 
 func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runState, prompt string, displayPrompt string) error {
+	state.LastRunError = ""
 	buildOpts := runBuildOptions{
 		AllowedTools: opts.AllowedTools,
 		Model:        opts.Model,
@@ -375,6 +377,9 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 				return nil
 			}
 			state.RunInterrupted = false
+			if strings.TrimSpace(state.LastRunError) != "" {
+				return errors.New(state.LastRunError)
+			}
 			return err
 		case event := <-l.controlEvents():
 			l.applyControlEvent(event, state, true, cancel)
@@ -440,6 +445,9 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 		presenter.lastWasStructured = true
 	case runEventDone:
 		state.StructuredOut = true
+		if event.IsError && strings.TrimSpace(event.Text) != "" {
+			state.LastRunError = strings.TrimSpace(event.Text)
+		}
 		l.runPresenterEnsureStructuredSpacing(presenter)
 		l.printf("%s\n", formatRunDone(event))
 		presenter.lastWasStructured = true
@@ -640,10 +648,16 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 	switch event.Type {
 	case runControlTypingStarted:
 		state.PendingInput = true
+		if !activeRun {
+			state.Paused = true
+		}
 		l.renderInputPrompt(state)
 	case runControlBufferUpdated:
 		state.InputBuffer = event.Text
 		state.PendingInput = event.Text != ""
+		if !activeRun && state.PendingInput {
+			state.Paused = true
+		}
 		l.renderInputPrompt(state)
 	case runControlPrompt:
 		state.PendingInput = false

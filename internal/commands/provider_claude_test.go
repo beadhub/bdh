@@ -62,6 +62,17 @@ func TestClaudeProviderParseOutput(t *testing.T) {
 		t.Fatalf("unexpected result cost: %#v", resultEvent.CostUSD)
 	}
 
+	errorResultEvent, err := provider.ParseOutput(`{"type":"result","duration_ms":320,"total_cost_usd":0,"session_id":"s1","is_error":true,"result":"You've hit your limit"}`)
+	if err != nil {
+		t.Fatalf("ParseOutput error result returned error: %v", err)
+	}
+	if errorResultEvent.Type != runEventDone || !errorResultEvent.IsError {
+		t.Fatalf("expected error result event, got %#v", errorResultEvent)
+	}
+	if errorResultEvent.Text != "You've hit your limit" {
+		t.Fatalf("unexpected error result text: %#v", errorResultEvent.Text)
+	}
+
 	systemEvent, err := provider.ParseOutput(`{"type":"system","subtype":"init","session_id":"abc123456789","cwd":"/tmp/project","model":"claude-opus"}`)
 	if err != nil {
 		t.Fatalf("ParseOutput system returned error: %v", err)

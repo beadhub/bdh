@@ -1009,6 +1009,62 @@ func TestRunLoopTypingDuringActiveRunDoesNotPauseLoop(t *testing.T) {
 	}
 }
 
+func TestIdleWithControlsTypingPausesCountdownUntilResume(t *testing.T) {
+	controller := newFakeRunInputController()
+	sleepStarted := make(chan struct{}, 1)
+	releaseSleep := make(chan struct{})
+	done := make(chan error, 1)
+
+	loop := &runLoop{
+		out:     io.Discard,
+		control: controller,
+		sleep: func(_ context.Context, _ time.Duration) error {
+			select {
+			case sleepStarted <- struct{}{}:
+			default:
+			}
+			<-releaseSleep
+			return nil
+		},
+	}
+
+	state := &runState{}
+	go func() {
+		done <- loop.idleWithControlsLabel(context.Background(), 2, state, "next run")
+	}()
+
+	select {
+	case <-sleepStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for countdown sleep to start")
+	}
+
+	controller.send(runControlEvent{Type: runControlTypingStarted})
+	controller.send(runControlEvent{Type: runControlBufferUpdated, Text: "draft"})
+	close(releaseSleep)
+
+	select {
+	case err := <-done:
+		t.Fatalf("countdown should pause instead of completing, got %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	if !state.Paused {
+		t.Fatal("expected typing during countdown to pause the loop")
+	}
+
+	controller.send(runControlEvent{Type: runControlResume})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected countdown to resume cleanly, got %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for countdown to finish after /resume")
+	}
+}
+
 func TestRunLoopPropagatesRunnerError(t *testing.T) {
 	expected := errors.New("runner failed")
 
@@ -1028,6 +1084,30 @@ func TestRunLoopPropagatesRunnerError(t *testing.T) {
 	})
 	if !errors.Is(err, expected) {
 		t.Fatalf("expected runner error, got: %v", err)
+	}
+}
+
+func TestRunLoopPrefersProviderStructuredErrorOverRawExitStatus(t *testing.T) {
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      io.Discard,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+			onLine(`{"type":"result","duration_ms":320,"session_id":"s1","is_error":true,"result":"You've hit your limit"}`)
+			return errors.New("exit status 1")
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		Prompt:  "keep going",
+		MaxRuns: 1,
+	})
+	if err == nil {
+		t.Fatal("expected run to fail")
+	}
+	if err.Error() != "You've hit your limit" {
+		t.Fatalf("expected structured provider error, got %q", err)
 	}
 }
 
