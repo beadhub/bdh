@@ -43,6 +43,13 @@ type runLoopOptions struct {
 	Model        string
 }
 
+type runCycleDecision struct {
+	MissionPrompt string
+	Prompt        string
+	WaitSeconds   int
+	Skip          bool
+}
+
 type runState struct {
 	Run            int
 	SessionID      string
@@ -66,9 +73,9 @@ var (
 	runIdleWait     int
 	runWorkingDir   string
 	runAllowedTools string
-	runIdlePrompt   string
 	runModel        string
 	runProviderName string
+	runIgnoreBeads  bool
 )
 
 var runCmd = &cobra.Command{
@@ -81,7 +88,7 @@ Current implementation includes:
   - stream-json parsing and formatted output
   - session continuity when requested
   - /stop, /wait, /resume, /quit, and prompt override controls
-  - bdh-driven dispatch between runs (chat, mail, claims, ready work, idle)
+  - bdh-driven dispatch between runs (chat, mail, claims, ready work)
   - adaptive wait behavior based on dispatch priority
 
 Future provider work will add non-Claude backends on top of the same loop.`,
@@ -98,7 +105,6 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		settings, err := resolveRunSettings(
 			runCfg,
 			cmd.Flags().Changed("wait"), runWaitSeconds,
-			cmd.Flags().Changed("idle-prompt"), runIdlePrompt,
 			cmd.Flags().Changed("idle-wait"), runIdleWait,
 		)
 		if err != nil {
@@ -111,8 +117,8 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		}
 
 		dispatchDefaults := runDispatchDefaults{
-			IdlePrompt:      settings.IdlePrompt,
 			IdleWaitSeconds: settings.IdleWaitSeconds,
+			IgnoreBeads:     runIgnoreBeads,
 		}
 
 		var dispatcher runDispatcher
@@ -165,14 +171,14 @@ func init() {
 	runCmd.Flags().IntVar(&runMaxRuns, "max-runs", 0, "Stop after N runs (0 means infinite)")
 	runCmd.Flags().StringVar(&runWorkingDir, "dir", "", "Working directory for the agent process")
 	runCmd.Flags().StringVar(&runAllowedTools, "allowed-tools", "", "Provider-specific allowed tools string")
-	runCmd.Flags().StringVar(&runIdlePrompt, "idle-prompt", "", "Idle prompt override when nothing needs attention")
 	runCmd.Flags().StringVar(&runModel, "model", "", "Provider-specific model override")
 	runCmd.Flags().StringVar(&runProviderName, "provider", "claude", "Agent provider to run")
+	runCmd.Flags().BoolVar(&runIgnoreBeads, "ignore-beads", false, "Ignore claims and ready beads; only wake for incoming chat or unread mail")
 }
 
 func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
-	if strings.TrimSpace(opts.Prompt) == "" && l.dispatch == nil {
-		return fmt.Errorf("prompt cannot be empty")
+	if l.dispatch == nil && strings.TrimSpace(opts.Prompt) == "" {
+		return fmt.Errorf("prompt cannot be empty when dispatch is unavailable")
 	}
 
 	if l.control != nil {
@@ -195,13 +201,28 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 	state := &runState{}
 
 	for {
-		prompt, waitSeconds, err := l.nextPrompt(ctx, opts, state)
+		decision, err := l.nextPrompt(ctx, opts, state)
 		if err != nil {
 			return err
 		}
+		if decision.Skip {
+			if err := l.waitForWork(ctx, decision.WaitSeconds, state); err != nil {
+				if state.StopRequested && errors.Is(err, context.Canceled) {
+					return nil
+				}
+				return err
+			}
+			continue
+		}
 
+		missionPrompt := resolveRunMissionPrompt(opts.Prompt, decision.MissionPrompt)
+		prompt := composeRunPrompt(missionPrompt, decision.Prompt)
+		displayPrompt := runDisplayPrompt(missionPrompt, decision.Prompt)
+		if strings.TrimSpace(prompt) == "" {
+			return fmt.Errorf("prompt cannot be empty")
+		}
 		state.Run++
-		if err := l.runOnce(ctx, opts, state, prompt); err != nil {
+		if err := l.runOnce(ctx, opts, state, prompt, displayPrompt); err != nil {
 			if state.StopRequested && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 				return nil
 			}
@@ -213,7 +234,7 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 			return nil
 		}
 
-		if err := l.waitForNextCycle(ctx, waitSeconds, state); err != nil {
+		if err := l.waitForNextCycle(ctx, decision.WaitSeconds, state); err != nil {
 			if state.StopRequested && errors.Is(err, context.Canceled) {
 				return nil
 			}
@@ -222,33 +243,46 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 	}
 }
 
-func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *runState) (string, int, error) {
-	if strings.TrimSpace(state.NextPrompt) != "" {
-		prompt := state.NextPrompt
+func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *runState) (runCycleDecision, error) {
+	queuedMissionPrompt := strings.TrimSpace(state.NextPrompt)
+	if queuedMissionPrompt != "" {
 		state.NextPrompt = ""
-		return prompt, opts.WaitSeconds, nil
-	}
-	if !state.RanOnce && strings.TrimSpace(opts.Prompt) != "" {
-		return opts.Prompt, opts.WaitSeconds, nil
 	}
 	if l.dispatch != nil {
 		decision, err := l.dispatch.Next(ctx)
 		if err != nil {
 			l.printf("info: dispatch failed: %v\n", err)
-			if strings.TrimSpace(opts.Prompt) != "" {
-				l.println("info: falling back to the explicit prompt.")
-				return opts.Prompt, opts.WaitSeconds, nil
+			if queuedMissionPrompt != "" {
+				l.println("info: using queued prompt while dispatch recovers.")
+				return runCycleDecision{
+					MissionPrompt: queuedMissionPrompt,
+					WaitSeconds:   opts.WaitSeconds,
+				}, nil
 			}
-			fallback := selectRunDispatch(runDispatchSummary{}, l.defaults)
-			l.println("info: falling back to idle prompt until dispatch recovers.")
-			return fallback.Prompt, fallback.WaitSeconds, nil
+			defaults := withRunDispatchDefaults(l.defaults)
+			l.println("info: waiting for dispatch recovery before starting a run.")
+			return runCycleDecision{WaitSeconds: defaults.IdleWaitSeconds, Skip: true}, nil
 		}
-		return decision.Prompt, decision.WaitSeconds, nil
+		cycle := runCycleDecision{
+			MissionPrompt: queuedMissionPrompt,
+			Prompt:        decision.Prompt,
+			WaitSeconds:   decision.WaitSeconds,
+			Skip:          decision.Skip,
+		}
+		if queuedMissionPrompt != "" && cycle.Skip {
+			cycle.Skip = false
+			cycle.WaitSeconds = opts.WaitSeconds
+		}
+		return cycle, nil
 	}
-	return opts.Prompt, opts.WaitSeconds, nil
+	return runCycleDecision{
+		MissionPrompt: queuedMissionPrompt,
+		Prompt:        "",
+		WaitSeconds:   opts.WaitSeconds,
+	}, nil
 }
 
-func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runState, prompt string) error {
+func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runState, prompt string, displayPrompt string) error {
 	buildOpts := runBuildOptions{
 		AllowedTools: opts.AllowedTools,
 		Model:        opts.Model,
@@ -266,7 +300,7 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 		return err
 	}
 
-	l.printf("\nrun #%d  %s  >  %s\n\n", state.Run, l.now().Format("15:04:05"), truncateRunText(prompt, 80))
+	l.printf("\nrun #%d  %s  >  %s\n\n", state.Run, l.now().Format("15:04:05"), truncateRunText(displayPrompt, 80))
 	l.println("type /wait, /stop, /quit, or start typing to queue a prompt.")
 	l.clearStatusLine()
 	l.renderInputPrompt(state)
@@ -290,7 +324,7 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 		case err := <-errCh:
 			l.drainPendingControlEvents(state)
 			state.RanOnce = true
-			if state.RunInterrupted && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			if state.RunInterrupted && (runCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 				state.RunInterrupted = false
 				return nil
 			}
@@ -418,7 +452,7 @@ func (l *runLoop) idle(ctx context.Context, seconds int) error {
 	}
 
 	for remaining := seconds; remaining > 0; remaining-- {
-		l.renderIdleLine(remaining, nil)
+		l.renderIdleLine("next run", remaining, nil)
 		if err := l.sleep(ctx, time.Second); err != nil {
 			l.clearStatusLine()
 			return err
@@ -449,6 +483,10 @@ func (l *runLoop) waitForNextCycle(ctx context.Context, waitSeconds int, state *
 	}
 
 	return l.idleWithControls(ctx, waitSeconds, state)
+}
+
+func (l *runLoop) waitForWork(ctx context.Context, waitSeconds int, state *runState) error {
+	return l.idleWithControlsLabel(ctx, waitSeconds, state, "waiting for work")
 }
 
 func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {
@@ -487,13 +525,17 @@ func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {
 }
 
 func (l *runLoop) idleWithControls(ctx context.Context, seconds int, state *runState) error {
+	return l.idleWithControlsLabel(ctx, seconds, state, "next run")
+}
+
+func (l *runLoop) idleWithControlsLabel(ctx context.Context, seconds int, state *runState, label string) error {
 	if seconds <= 0 {
 		return nil
 	}
 	defer l.clearStatusLine()
 
 	for remaining := seconds; remaining > 0; remaining-- {
-		l.renderIdleLine(remaining, state)
+		l.renderIdleLine(label, remaining, state)
 
 		select {
 		case event := <-l.controlEvents():
@@ -648,8 +690,8 @@ func (l *runLoop) renderInputPrompt(state *runState) {
 	fmt.Fprintf(l.out, "\r\033[K%s", prompt)
 }
 
-func (l *runLoop) renderIdleLine(remaining int, state *runState) {
-	line := fmt.Sprintf("next run in %ds", remaining)
+func (l *runLoop) renderIdleLine(label string, remaining int, state *runState) {
+	line := fmt.Sprintf("%s in %ds", label, remaining)
 
 	if l.screen != nil {
 		l.screen.SetStatusLine(line)
@@ -663,6 +705,34 @@ func (l *runLoop) renderIdleLine(remaining int, state *runState) {
 		line = fmt.Sprintf("%s  >  %s", line, state.InputBuffer)
 	}
 	fmt.Fprintf(l.out, "\r\033[K%s", line)
+}
+
+func resolveRunMissionPrompt(basePrompt string, overridePrompt string) string {
+	overridePrompt = strings.TrimSpace(overridePrompt)
+	if overridePrompt != "" {
+		return overridePrompt
+	}
+	return strings.TrimSpace(basePrompt)
+}
+
+func composeRunPrompt(missionPrompt string, cyclePrompt string) string {
+	missionPrompt = strings.TrimSpace(missionPrompt)
+	cyclePrompt = strings.TrimSpace(cyclePrompt)
+	if missionPrompt == "" {
+		return cyclePrompt
+	}
+	if cyclePrompt == "" {
+		return missionPrompt
+	}
+	return fmt.Sprintf("Primary mission:\n%s\n\nCurrent cycle:\n%s", missionPrompt, cyclePrompt)
+}
+
+func runDisplayPrompt(missionPrompt string, cyclePrompt string) string {
+	cyclePrompt = strings.TrimSpace(cyclePrompt)
+	if cyclePrompt != "" {
+		return cyclePrompt
+	}
+	return strings.TrimSpace(missionPrompt)
 }
 
 func (l *runLoop) setStatusLine(text string) {
@@ -716,10 +786,16 @@ func realRunCommand(ctx context.Context, dir string, argv []string, onLine func(
 	}
 	if err := scanner.Err(); err != nil {
 		_ = cmd.Wait()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return err
 	}
 
 	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		stderrText := strings.TrimSpace(stderr.String())
 		if stderrText != "" {
 			return fmt.Errorf("%w: %s", err, stderrText)

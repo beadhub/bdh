@@ -32,26 +32,38 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 	task := runReadyTask{ID: "bdh-54y", Title: "List active"}
 
 	chatDecision := selectRunDispatch(runDispatchSummary{
-		PendingChatAlias: "grace",
-		UnreadMailCount:  3,
-		CurrentClaim:     &claim,
-		ReadyTask:        &task,
+		PendingChat: &runPendingChat{
+			Alias: "grace",
+			Messages: []runCommsMessage{
+				{From: "grace", Body: "Please validate the latest run behavior."},
+			},
+		},
+		UnreadMail:   []runUnreadMail{{From: "mia", Subject: "triage", Body: "mail body"}},
+		CurrentClaim: &claim,
+		ReadyTask:    &task,
 	}, defaults)
 	if !containsText(chatDecision.Prompt, "Respond to chat from grace") {
 		t.Fatalf("expected chat prompt, got: %q", chatDecision.Prompt)
+	}
+	if !containsText(chatDecision.Prompt, "Please validate the latest run behavior.") {
+		t.Fatalf("expected chat content in prompt, got: %q", chatDecision.Prompt)
 	}
 	if chatDecision.WaitSeconds != 5 {
 		t.Fatalf("expected short wait for chat, got %d", chatDecision.WaitSeconds)
 	}
 
 	mailDecision := selectRunDispatch(runDispatchSummary{
-		UnreadMailCount: 2,
-		UnreadMailFrom:  "mia",
-		CurrentClaim:    &claim,
-		ReadyTask:       &task,
+		UnreadMail: []runUnreadMail{
+			{From: "mia", Subject: "Review", Body: "Can you review the command flow?"},
+		},
+		CurrentClaim: &claim,
+		ReadyTask:    &task,
 	}, defaults)
-	if !containsText(mailDecision.Prompt, "unread mail from mia") {
+	if !containsText(mailDecision.Prompt, "From: mia") {
 		t.Fatalf("expected mail prompt, got: %q", mailDecision.Prompt)
+	}
+	if !containsText(mailDecision.Prompt, "Can you review the command flow?") {
+		t.Fatalf("expected mail body in prompt, got: %q", mailDecision.Prompt)
 	}
 
 	claimDecision := selectRunDispatch(runDispatchSummary{
@@ -74,15 +86,70 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 	if idleDecision.WaitSeconds != 30 {
 		t.Fatalf("expected long idle wait, got %d", idleDecision.WaitSeconds)
 	}
-	if !containsText(idleDecision.Prompt, "Check for pending chat messages or unread mail") {
-		t.Fatalf("expected idle prompt, got: %q", idleDecision.Prompt)
+	if !idleDecision.Skip {
+		t.Fatalf("expected idle dispatch to skip provider launch")
 	}
 }
 
-func TestRunLoopUsesDispatcherAfterInitialPrompt(t *testing.T) {
+func TestSelectRunDispatchIgnoreBeadsSkipsClaimAndReadyWork(t *testing.T) {
+	defaults := withRunDispatchDefaults(runDispatchDefaults{IgnoreBeads: true, IdleWaitSeconds: 17})
+	claim := ClaimInfo{BeadID: "bdh-421.3", Title: "Dispatch logic"}
+	task := runReadyTask{ID: "bdh-54y", Title: "List active"}
+
+	decision := selectRunDispatch(runDispatchSummary{
+		CurrentClaim: &claim,
+		ReadyTask:    &task,
+	}, defaults)
+
+	if !decision.Skip {
+		t.Fatalf("expected ignore-beads mode to skip when only bead work is present, got %#v", decision)
+	}
+	if decision.WaitSeconds != 17 {
+		t.Fatalf("expected configured idle wait, got %d", decision.WaitSeconds)
+	}
+}
+
+func TestSelectRunDispatchIgnoreBeadsStillWakesForComms(t *testing.T) {
+	defaults := withRunDispatchDefaults(runDispatchDefaults{IgnoreBeads: true})
+
+	chatDecision := selectRunDispatch(runDispatchSummary{
+		PendingChat: &runPendingChat{
+			Alias: "grace",
+			Messages: []runCommsMessage{
+				{From: "grace", Body: "Please reply on this now."},
+			},
+		},
+	}, defaults)
+	if chatDecision.Skip {
+		t.Fatalf("expected chat to wake agent even with ignore-beads")
+	}
+
+	mailDecision := selectRunDispatch(runDispatchSummary{
+		UnreadMail: []runUnreadMail{
+			{From: "grace", Subject: "Review", Body: "Please reply on this now."},
+		},
+	}, defaults)
+	if mailDecision.Skip {
+		t.Fatalf("expected mail to wake agent even with ignore-beads")
+	}
+}
+
+func TestTruncateRunDispatchBody(t *testing.T) {
+	long := strings.Repeat("a", runDispatchBodyLimit+20)
+	got := truncateRunDispatchBody(long)
+	if len(got) <= runDispatchBodyLimit {
+		t.Fatalf("expected truncated body with ellipsis, got length %d", len(got))
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected ellipsis suffix, got %q", got)
+	}
+}
+
+func TestRunLoopComposesBasePromptWithDispatcherPrompt(t *testing.T) {
 	dispatcher := &fakeRunDispatcher{
 		decisions: []runDispatchDecision{
-			{Prompt: "dispatch prompt", WaitSeconds: 7},
+			{Prompt: "dispatch prompt one", WaitSeconds: 7},
+			{Prompt: "dispatch prompt two", WaitSeconds: 7},
 		},
 	}
 	var commands [][]string
@@ -111,83 +178,97 @@ func TestRunLoopUsesDispatcherAfterInitialPrompt(t *testing.T) {
 	if len(commands) != 2 {
 		t.Fatalf("expected 2 runs, got %d", len(commands))
 	}
-	if !containsText(joinArgs(commands[0]), "initial prompt") {
-		t.Fatalf("expected first run to use explicit prompt, got %q", joinArgs(commands[0]))
-	}
-	if !containsText(joinArgs(commands[1]), "dispatch prompt") {
-		t.Fatalf("expected second run to use dispatch prompt, got %q", joinArgs(commands[1]))
+	for i, want := range []string{"dispatch prompt one", "dispatch prompt two"} {
+		cmd := joinArgs(commands[i])
+		if !containsText(cmd, "initial prompt") {
+			t.Fatalf("expected base prompt in run %d, got %q", i+1, cmd)
+		}
+		if !containsText(cmd, want) {
+			t.Fatalf("expected dispatch prompt %q in run %d, got %q", want, i+1, cmd)
+		}
 	}
 }
 
-func TestRunLoopFallsBackToExplicitPromptOnDispatchError(t *testing.T) {
+func TestRunLoopWaitsForDispatchRecoveryOnDispatchErrorEvenWithBasePrompt(t *testing.T) {
 	dispatcher := &fakeRunDispatcher{err: errors.New("server down")}
-	var commands [][]string
 	var output strings.Builder
+	var slept []time.Duration
 
 	loop := &runLoop{
 		provider: claudeProvider{},
 		now:      time.Now,
 		out:      &output,
-		sleep:    func(context.Context, time.Duration) error { return nil },
+		defaults: runDispatchDefaults{IdleWaitSeconds: 1},
+		sleep: func(_ context.Context, d time.Duration) error {
+			slept = append(slept, d)
+			return nil
+		},
 		dispatch: dispatcher,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
-			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+		runner: func(_ context.Context, _ string, _ []string, _ func(string)) error {
+			t.Fatal("runner should not be called")
 			return nil
 		},
 	}
 
-	err := loop.Run(context.Background(), runLoopOptions{
+	ctx, cancel := context.WithCancel(context.Background())
+	loop.sleep = func(_ context.Context, d time.Duration) error {
+		slept = append(slept, d)
+		cancel()
+		return nil
+	}
+	err := loop.Run(ctx, runLoopOptions{
 		Prompt:      "stable prompt",
 		WaitSeconds: 0,
-		MaxRuns:     2,
 	})
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
 	}
-	if len(commands) != 2 {
-		t.Fatalf("expected 2 runs, got %d", len(commands))
-	}
-	if !containsText(joinArgs(commands[1]), "stable prompt") {
-		t.Fatalf("expected fallback explicit prompt, got %q", joinArgs(commands[1]))
+	if len(slept) == 0 {
+		t.Fatal("expected idle sleep while waiting for dispatch recovery")
 	}
 	if !containsText(output.String(), "dispatch failed: server down") {
 		t.Fatalf("expected dispatch failure log, got %q", output.String())
 	}
+	if !containsText(output.String(), "waiting for dispatch recovery") {
+		t.Fatalf("expected dispatch recovery log, got %q", output.String())
+	}
 }
 
-func TestRunLoopFallsBackToIdlePromptOnDispatchErrorWithoutExplicitPrompt(t *testing.T) {
+func TestRunLoopWaitsForDispatchRecoveryWithoutExplicitPrompt(t *testing.T) {
 	dispatcher := &fakeRunDispatcher{err: errors.New("server down")}
-	var commands [][]string
 	var output strings.Builder
+	var slept []time.Duration
 
 	loop := &runLoop{
 		provider: claudeProvider{},
 		now:      time.Now,
 		out:      &output,
-		sleep:    func(context.Context, time.Duration) error { return nil },
+		defaults: runDispatchDefaults{IdleWaitSeconds: 1},
+		sleep: func(_ context.Context, d time.Duration) error {
+			slept = append(slept, d)
+			return nil
+		},
 		dispatch: dispatcher,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
-			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+		runner: func(_ context.Context, _ string, _ []string, _ func(string)) error {
+			t.Fatal("runner should not be called")
 			return nil
 		},
 	}
 
-	err := loop.Run(context.Background(), runLoopOptions{
-		WaitSeconds: 0,
-		MaxRuns:     1,
-	})
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	loop.sleep = func(_ context.Context, d time.Duration) error {
+		slept = append(slept, d)
+		cancel()
+		return nil
 	}
-	if len(commands) != 1 {
-		t.Fatalf("expected 1 run, got %d", len(commands))
+	err := loop.Run(ctx, runLoopOptions{WaitSeconds: 0})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
 	}
-	if !containsText(joinArgs(commands[0]), "Check for pending chat messages or unread mail") {
-		t.Fatalf("expected idle fallback prompt, got %q", joinArgs(commands[0]))
+	if len(slept) == 0 {
+		t.Fatal("expected idle sleep while waiting for dispatch recovery")
 	}
-	if !containsText(output.String(), "falling back to idle prompt") {
-		t.Fatalf("expected idle fallback log, got %q", output.String())
+	if !containsText(output.String(), "waiting for dispatch recovery") {
+		t.Fatalf("expected dispatch recovery log, got %q", output.String())
 	}
 }
