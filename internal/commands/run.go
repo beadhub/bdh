@@ -77,7 +77,7 @@ Current implementation includes:
   - repeated claude -p invocations
   - stream-json parsing and formatted output
   - session continuity when requested
-  - /stop, /wait, /resume, and prompt override controls
+  - /stop, /wait, /resume, /quit, and prompt override controls
   - bdh-driven dispatch between runs (chat, mail, claims, ready work, idle)
   - adaptive wait behavior based on dispatch priority
 
@@ -245,7 +245,7 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 	}
 
 	l.printf("\nrun #%d  %s  >  %s\n\n", state.Run, l.now().Format("15:04:05"), truncateRunText(prompt, 80))
-	l.println("type /wait, /stop, or start typing to queue a prompt.")
+	l.println("type /wait, /stop, /quit, or start typing to queue a prompt.")
 	l.clearStatusLine()
 	l.renderInputPrompt(state)
 
@@ -409,7 +409,7 @@ func (l *runLoop) waitForNextCycle(ctx context.Context, waitSeconds int, state *
 		state.Paused = true
 		state.PauseAfterRun = false
 		if !state.PendingInput {
-			l.println("paused. use /resume or type a prompt to continue.")
+			l.println("paused. use /resume, /quit, or type a prompt to continue.")
 		}
 		return l.waitWhilePaused(ctx, state)
 	}
@@ -418,7 +418,7 @@ func (l *runLoop) waitForNextCycle(ctx context.Context, waitSeconds int, state *
 }
 
 func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {
-	l.setStatusLine("paused: /resume or type a prompt")
+	l.setStatusLine("paused: /resume, /quit, or type a prompt")
 	defer l.clearStatusLine()
 
 	for {
@@ -522,7 +522,7 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		if activeRun {
 			l.println("\nwill pause after this run.")
 		} else {
-			l.println("paused. use /resume or type a prompt to continue.")
+			l.println("paused. use /resume, /quit, or type a prompt to continue.")
 		}
 	case runControlResume:
 		state.PendingInput = false
@@ -532,6 +532,17 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 			state.PauseAfterRun = false
 		}
 		l.renderInputPrompt(state)
+	case runControlQuit:
+		state.PendingInput = false
+		state.InputBuffer = ""
+		state.StopRequested = true
+		state.Paused = false
+		state.PauseAfterRun = false
+		if activeRun && cancel != nil {
+			l.println("\nquitting.")
+			cancel()
+			return
+		}
 	case runControlStop:
 		state.PendingInput = false
 		state.InputBuffer = ""
@@ -539,11 +550,11 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		state.PauseAfterRun = false
 		if activeRun && cancel != nil {
 			state.RunInterrupted = true
-			l.println("\nstopped current run. paused. use /resume or type a prompt to continue.")
+			l.println("\nstopped current run. paused. use /resume, /quit, or type a prompt to continue.")
 			cancel()
 			return
 		}
-		l.println("paused. use /resume or type a prompt to continue.")
+		l.println("paused. use /resume, /quit, or type a prompt to continue.")
 	}
 }
 

@@ -282,6 +282,46 @@ func TestRunLoopStopCancelsActiveRunAndPausesUntilResume(t *testing.T) {
 	}
 }
 
+func TestRunLoopQuitCancelsActiveRunAndExits(t *testing.T) {
+	controller := newFakeRunInputController()
+	runStarted := make(chan struct{})
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      io.Discard,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		control:  controller,
+		runner: func(ctx context.Context, _ string, _ []string, _ func(string)) error {
+			close(runStarted)
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- loop.Run(context.Background(), runLoopOptions{Prompt: "keep going"})
+	}()
+
+	select {
+	case <-runStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for run to start")
+	}
+
+	controller.send(runControlEvent{Type: runControlQuit})
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("expected graceful quit, got: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for loop to quit")
+	}
+}
+
 func TestRunLoopWaitPausesUntilResume(t *testing.T) {
 	controller := newFakeRunInputController()
 	firstRunStarted := make(chan struct{})
