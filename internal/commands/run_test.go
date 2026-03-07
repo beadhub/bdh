@@ -173,10 +173,10 @@ func TestComposeRunPromptUsesBaseAndCycleSections(t *testing.T) {
 	}
 }
 
-func TestComposeRunPromptFallsBackToDefaultBasePrompt(t *testing.T) {
-	got := composeRunPrompt("", "")
-	if got != defaultRunBasePrompt {
-		t.Fatalf("expected default base prompt, got %q", got)
+func TestComposeRunPromptWithoutBaseUsesCycleOnly(t *testing.T) {
+	got := composeRunPrompt("", "Respond to unread chat from grace.")
+	if got != "Respond to unread chat from grace." {
+		t.Fatalf("expected cycle-only prompt, got %q", got)
 	}
 }
 

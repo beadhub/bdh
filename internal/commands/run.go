@@ -50,8 +50,6 @@ type runCycleDecision struct {
 	Skip          bool
 }
 
-const defaultRunBasePrompt = "Work autonomously in this repository. Use BeadHub to coordinate, respond to pending communication, and advance the highest-priority available work."
-
 type runState struct {
 	Run            int
 	SessionID      string
@@ -177,6 +175,10 @@ func init() {
 }
 
 func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
+	if l.dispatch == nil && strings.TrimSpace(opts.Prompt) == "" {
+		return fmt.Errorf("prompt cannot be empty when dispatch is unavailable")
+	}
+
 	if l.control != nil {
 		if err := l.control.Start(); err != nil {
 			return err
@@ -214,6 +216,9 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 		missionPrompt := resolveRunMissionPrompt(opts.Prompt, decision.MissionPrompt)
 		prompt := composeRunPrompt(missionPrompt, decision.Prompt)
 		displayPrompt := runDisplayPrompt(missionPrompt, decision.Prompt)
+		if strings.TrimSpace(prompt) == "" {
+			return fmt.Errorf("prompt cannot be empty")
+		}
 		state.Run++
 		if err := l.runOnce(ctx, opts, state, prompt, displayPrompt); err != nil {
 			if state.StopRequested && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
@@ -700,28 +705,20 @@ func (l *runLoop) renderIdleLine(label string, remaining int, state *runState) {
 	fmt.Fprintf(l.out, "\r\033[K%s", line)
 }
 
-func resolveRunBasePrompt(prompt string) string {
-	prompt = strings.TrimSpace(prompt)
-	if prompt != "" {
-		return prompt
-	}
-	return defaultRunBasePrompt
-}
-
 func resolveRunMissionPrompt(basePrompt string, overridePrompt string) string {
 	overridePrompt = strings.TrimSpace(overridePrompt)
 	if overridePrompt != "" {
 		return overridePrompt
 	}
-	return resolveRunBasePrompt(basePrompt)
+	return strings.TrimSpace(basePrompt)
 }
 
 func composeRunPrompt(missionPrompt string, cyclePrompt string) string {
 	missionPrompt = strings.TrimSpace(missionPrompt)
-	if missionPrompt == "" {
-		missionPrompt = defaultRunBasePrompt
-	}
 	cyclePrompt = strings.TrimSpace(cyclePrompt)
+	if missionPrompt == "" {
+		return cyclePrompt
+	}
 	if cyclePrompt == "" {
 		return missionPrompt
 	}
