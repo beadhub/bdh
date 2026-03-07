@@ -204,9 +204,12 @@ func TestRunLoopIdleCountdown(t *testing.T) {
 	}
 }
 
-func TestRunLoopStopCancelsActiveRun(t *testing.T) {
+func TestRunLoopStopCancelsActiveRunAndPausesUntilResume(t *testing.T) {
 	controller := newFakeRunInputController()
 	runStarted := make(chan struct{})
+	secondRunStarted := make(chan struct{})
+	var mu sync.Mutex
+	runCount := 0
 
 	loop := &runLoop{
 		provider: claudeProvider{},
@@ -214,16 +217,31 @@ func TestRunLoopStopCancelsActiveRun(t *testing.T) {
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		control:  controller,
-		runner: func(ctx context.Context, _ string, _ []string, _ func(string)) error {
-			close(runStarted)
-			<-ctx.Done()
-			return ctx.Err()
+		runner: func(ctx context.Context, _ string, _ []string, onLine func(string)) error {
+			mu.Lock()
+			runCount++
+			currentRun := runCount
+			mu.Unlock()
+
+			if currentRun == 1 {
+				close(runStarted)
+				<-ctx.Done()
+				return ctx.Err()
+			}
+
+			close(secondRunStarted)
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
 		},
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- loop.Run(context.Background(), runLoopOptions{Prompt: "keep going"})
+		errCh <- loop.Run(context.Background(), runLoopOptions{
+			Prompt:      "keep going",
+			WaitSeconds: 0,
+			MaxRuns:     2,
+		})
 	}()
 
 	select {
@@ -235,12 +253,32 @@ func TestRunLoopStopCancelsActiveRun(t *testing.T) {
 	controller.send(runControlEvent{Type: runControlStop})
 
 	select {
+	case <-secondRunStarted:
+		t.Fatal("second run should not start before /resume after /stop")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("loop should stay alive after /stop, got %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	controller.send(runControlEvent{Type: runControlResume})
+
+	select {
+	case <-secondRunStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for second run after /resume")
+	}
+
+	select {
 	case err := <-errCh:
 		if err != nil {
-			t.Fatalf("expected graceful stop, got: %v", err)
+			t.Fatalf("expected graceful completion, got: %v", err)
 		}
 	case <-time.After(200 * time.Millisecond):
-		t.Fatal("timed out waiting for loop to stop")
+		t.Fatal("timed out waiting for loop to finish")
 	}
 }
 
@@ -382,6 +420,73 @@ func TestRunLoopPromptOverrideFromActiveRun(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(commands[1], " "), "override prompt") {
 		t.Fatalf("expected override prompt on second run, got %q", strings.Join(commands[1], " "))
+	}
+}
+
+func TestRunLoopTypingDuringActiveRunDoesNotPauseLoop(t *testing.T) {
+	controller := newFakeRunInputController()
+	firstRunStarted := make(chan struct{})
+	releaseFirstRun := make(chan struct{})
+	secondRunStarted := make(chan struct{})
+	var mu sync.Mutex
+	runCount := 0
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      io.Discard,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		control:  controller,
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+			mu.Lock()
+			runCount++
+			currentRun := runCount
+			mu.Unlock()
+
+			if currentRun == 1 {
+				close(firstRunStarted)
+				<-releaseFirstRun
+			} else if currentRun == 2 {
+				close(secondRunStarted)
+			}
+
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- loop.Run(context.Background(), runLoopOptions{
+			Prompt:      "keep going",
+			WaitSeconds: 0,
+			MaxRuns:     2,
+		})
+	}()
+
+	select {
+	case <-firstRunStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for first run")
+	}
+
+	controller.send(runControlEvent{Type: runControlTypingStarted})
+	controller.send(runControlEvent{Type: runControlBufferUpdated, Text: "draft input"})
+	close(releaseFirstRun)
+
+	select {
+	case <-secondRunStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("typing should not pause the loop after the current run")
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for loop to finish")
 	}
 }
 

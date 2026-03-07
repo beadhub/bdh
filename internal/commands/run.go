@@ -43,18 +43,19 @@ type runLoopOptions struct {
 }
 
 type runState struct {
-	Run           int
-	SessionID     string
-	RanOnce       bool
-	PauseAfterRun bool
-	StopRequested bool
-	Paused        bool
-	NextPrompt    string
-	PendingInput  bool
-	InputBuffer   string
-	TextProbe     string
-	SuppressText  bool
-	StructuredOut bool
+	Run            int
+	SessionID      string
+	RanOnce        bool
+	RunInterrupted bool
+	PauseAfterRun  bool
+	StopRequested  bool
+	Paused         bool
+	NextPrompt     string
+	PendingInput   bool
+	InputBuffer    string
+	TextProbe      string
+	SuppressText   bool
+	StructuredOut  bool
 }
 
 var (
@@ -266,6 +267,11 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 		select {
 		case err := <-errCh:
 			state.RanOnce = true
+			if state.RunInterrupted && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				state.RunInterrupted = false
+				return nil
+			}
+			state.RunInterrupted = false
 			return err
 		case event := <-l.controlEvents():
 			l.applyControlEvent(event, state, true, cancel)
@@ -399,7 +405,7 @@ func (l *runLoop) waitForNextCycle(ctx context.Context, waitSeconds int, state *
 		return nil
 	}
 
-	if state.PauseAfterRun || state.Paused || l.control.HasPendingInput() {
+	if state.PauseAfterRun || state.Paused {
 		state.Paused = true
 		state.PauseAfterRun = false
 		if !state.PendingInput {
@@ -423,7 +429,7 @@ func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {
 			state.Paused = false
 			return nil
 		}
-		if !state.Paused && !state.PendingInput {
+		if !state.Paused {
 			return nil
 		}
 
@@ -437,7 +443,7 @@ func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {
 				state.Paused = false
 				return nil
 			}
-			if !state.Paused && !state.PendingInput {
+			if !state.Paused {
 				return nil
 			}
 		case <-ctx.Done():
@@ -465,7 +471,7 @@ func (l *runLoop) idleWithControls(ctx context.Context, seconds int, state *runS
 			if strings.TrimSpace(state.NextPrompt) != "" {
 				return nil
 			}
-			if state.Paused || state.PendingInput {
+			if state.Paused {
 				return l.waitWhilePaused(ctx, state)
 			}
 			remaining++
@@ -494,10 +500,6 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 	switch event.Type {
 	case runControlTypingStarted:
 		state.PendingInput = true
-		if activeRun && !state.PauseAfterRun {
-			state.PauseAfterRun = true
-			l.println("\ninput pending: auto-dispatch will pause after this run.")
-		}
 		l.renderInputPrompt(state)
 	case runControlBufferUpdated:
 		state.InputBuffer = event.Text
@@ -509,7 +511,6 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		state.NextPrompt = strings.TrimSpace(event.Text)
 		state.Paused = false
 		if activeRun {
-			state.PauseAfterRun = true
 			l.printf("\nqueued prompt override: %s\n", truncateRunText(state.NextPrompt, 80))
 		}
 		l.renderInputPrompt(state)
@@ -534,10 +535,15 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 	case runControlStop:
 		state.PendingInput = false
 		state.InputBuffer = ""
-		state.StopRequested = true
-		if cancel != nil {
+		state.Paused = true
+		state.PauseAfterRun = false
+		if activeRun && cancel != nil {
+			state.RunInterrupted = true
+			l.println("\nstopped current run. paused. use /resume or type a prompt to continue.")
 			cancel()
+			return
 		}
+		l.println("paused. use /resume or type a prompt to continue.")
 	}
 }
 
