@@ -997,6 +997,48 @@ func (c *Client) ListLocks(ctx context.Context, req *ListLocksRequest) (*ListLoc
 	return &resp, nil
 }
 
+// =============================================================================
+// Beads Issues API
+// =============================================================================
+
+// BeadsIssuesRequest is the request parameters for GET /v1/beads/issues.
+type BeadsIssuesRequest struct {
+	Repo     string `json:"repo,omitempty"`
+	Branch   string `json:"branch,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Assignee string `json:"assignee,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
+}
+
+// BeadsIssue represents a single issue in the response.
+type BeadsIssue struct {
+	BeadID   string `json:"bead_id"`
+	Repo     string `json:"repo"`
+	Branch   string `json:"branch"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Priority int    `json:"priority"`
+	Type     string `json:"type"`
+	Assignee string `json:"assignee,omitempty"`
+}
+
+// BeadsIssuesResponse is the response from GET /v1/beads/issues.
+type BeadsIssuesResponse struct {
+	Issues  []BeadsIssue `json:"issues"`
+	Count   int          `json:"count"`
+	HasMore bool         `json:"has_more"`
+}
+
+// BeadsIssues lists beads issues from the server.
+func (c *Client) BeadsIssues(ctx context.Context, req *BeadsIssuesRequest) (*BeadsIssuesResponse, error) {
+	var resp BeadsIssuesResponse
+	if err := c.get(ctx, "/v1/beads/issues", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // Error represents an error response from the BeadHub server.
 type Error struct {
 	StatusCode int
@@ -1252,6 +1294,25 @@ func (c *Client) getWithHeaders(ctx context.Context, path string, params any, re
 			}
 			if p.OnlySelected != nil {
 				q.Set("only_selected", fmt.Sprintf("%t", *p.OnlySelected))
+			}
+		case *BeadsIssuesRequest:
+			if p.Repo != "" {
+				q.Set("repo", p.Repo)
+			}
+			if p.Branch != "" {
+				q.Set("branch", p.Branch)
+			}
+			if p.Status != "" {
+				q.Set("status", p.Status)
+			}
+			if p.Assignee != "" {
+				q.Set("assignee", p.Assignee)
+			}
+			if p.Type != "" {
+				q.Set("type", p.Type)
+			}
+			if p.Limit > 0 {
+				q.Set("limit", fmt.Sprintf("%d", p.Limit))
 			}
 		}
 		req.URL.RawQuery = q.Encode()

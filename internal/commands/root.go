@@ -87,6 +87,7 @@ func init() {
 	rootCmd.AddCommand(helpCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(listActiveCmd)
 }
 
 func loadDotenvBestEffort() {
