@@ -419,9 +419,8 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 			presenter.lastWasText = false
 		}
 		for _, call := range event.ToolCalls {
-			l.printf("tool: %s\n", call.Name)
-			for _, inputLine := range formatRunToolInputLines(call.Input) {
-				l.printf("  %s\n", inputLine)
+			for _, line := range formatRunToolCallLines(call) {
+				l.printf("%s\n", line)
 			}
 		}
 	case runEventToolResult:
