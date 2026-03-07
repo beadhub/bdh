@@ -407,6 +407,68 @@ func TestRunLoopPropagatesRunnerError(t *testing.T) {
 	}
 }
 
+func TestApplyControlEvent_BufferUpdatedRendersInputPrompt(t *testing.T) {
+	var output strings.Builder
+	loop := &runLoop{out: &output}
+	state := &runState{Paused: true}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: "/wait"}, state, false, nil)
+
+	if state.InputBuffer != "/wait" {
+		t.Fatalf("expected input buffer to update, got %q", state.InputBuffer)
+	}
+	if !containsText(output.String(), "input> /wait") {
+		t.Fatalf("expected rendered input prompt, got %q", output.String())
+	}
+}
+
+func TestApplyControlEvent_BufferUpdatedRendersInputPromptOnScreen(t *testing.T) {
+	screen := &runScreenManager{}
+	loop := &runLoop{screen: screen}
+	state := &runState{Paused: true}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: "/wait"}, state, false, nil)
+
+	if screen.inputLine != "input> /wait" {
+		t.Fatalf("expected screen input line, got %q", screen.inputLine)
+	}
+}
+
+func TestShouldSuppressText_PromptEcho(t *testing.T) {
+	var output strings.Builder
+	loop := &runLoop{out: &output}
+	state := &runState{}
+
+	suppressed := loop.shouldSuppressText(state, strings.Repeat("intro ", 40)+" BeadHub Coordination Rules "+"bdh :policy")
+	if !suppressed {
+		t.Fatal("expected boilerplate text to be suppressed")
+	}
+	if !state.SuppressText {
+		t.Fatal("expected suppression flag to be set")
+	}
+	if !containsText(output.String(), "[suppressed prompt/policy echo]") {
+		t.Fatalf("expected suppression notice, got %q", output.String())
+	}
+}
+
+func TestRenderIdleLineUsesStatusAreaOnScreen(t *testing.T) {
+	screen := &runScreenManager{}
+	loop := &runLoop{screen: screen}
+	state := &runState{
+		PendingInput: true,
+		InputBuffer:  "/resume soon",
+	}
+
+	loop.renderIdleLine(12, state)
+
+	if screen.statusLine != "next run in 12s" {
+		t.Fatalf("expected status line to hold countdown, got %q", screen.statusLine)
+	}
+	if screen.inputLine != "input> /resume soon" {
+		t.Fatalf("expected input line to remain separate, got %q", screen.inputLine)
+	}
+}
+
 func joinArgs(args []string) string {
 	return strings.Join(args, " ")
 }

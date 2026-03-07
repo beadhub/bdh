@@ -28,6 +28,7 @@ type runLoop struct {
 	out      io.Writer
 	control  runInputController
 	dispatch runDispatcher
+	screen   *runScreenManager
 	writeMu  sync.Mutex
 }
 
@@ -50,6 +51,10 @@ type runState struct {
 	Paused        bool
 	NextPrompt    string
 	PendingInput  bool
+	InputBuffer   string
+	TextProbe     string
+	SuppressText  bool
+	StructuredOut bool
 }
 
 var (
@@ -109,6 +114,7 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 			out:      cmd.OutOrStdout(),
 			control:  newTerminalRunInput(cmd.InOrStdin()),
 			dispatch: dispatcher,
+			screen:   newRunScreenManager(cmd.OutOrStdout()),
 		}
 
 		opts := runLoopOptions{
@@ -149,6 +155,12 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 			return err
 		}
 		defer func() { _ = l.control.Stop() }()
+	}
+	if l.screen != nil {
+		if err := l.screen.Start(); err != nil {
+			return err
+		}
+		defer func() { _ = l.screen.Stop() }()
 	}
 
 	state := &runState{}
@@ -226,8 +238,14 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 	}
 
 	l.printf("\nrun #%d  %s  >  %s\n\n", state.Run, l.now().Format("15:04:05"), truncateRunText(prompt, 80))
+	l.println("type /wait, /stop, or start typing to queue a prompt.")
+	l.clearStatusLine()
+	l.renderInputPrompt(state)
 
 	presenter := &runPresenterState{}
+	state.TextProbe = ""
+	state.SuppressText = false
+	state.StructuredOut = false
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -270,9 +288,13 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 
 	switch event.Type {
 	case runEventText:
+		if l.shouldSuppressText(state, event.Text) {
+			return
+		}
 		l.print(event.Text)
 		presenter.lastWasText = true
 	case runEventToolCall:
+		state.StructuredOut = true
 		if presenter.lastWasText {
 			l.println("")
 			presenter.lastWasText = false
@@ -285,6 +307,7 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 			l.printf("tool: %s\n", call.Name)
 		}
 	case runEventToolResult:
+		state.StructuredOut = true
 		if presenter.lastWasText {
 			l.println("")
 			presenter.lastWasText = false
@@ -293,12 +316,14 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 			l.printf("  -> %s\n", truncateRunText(text, 150))
 		}
 	case runEventDone:
+		state.StructuredOut = true
 		if presenter.lastWasText {
 			l.println("")
 			presenter.lastWasText = false
 		}
 		l.printf("%s\n", formatRunDone(event))
 	case runEventSystem:
+		state.StructuredOut = true
 		if presenter.lastWasText {
 			l.println("")
 			presenter.lastWasText = false
@@ -307,6 +332,38 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 			l.printf("info: %s\n", text)
 		}
 	}
+	l.renderInputPrompt(state)
+}
+
+func (l *runLoop) shouldSuppressText(state *runState, text string) bool {
+	if state == nil || state.StructuredOut {
+		return false
+	}
+	if state.SuppressText {
+		return true
+	}
+
+	state.TextProbe += text
+	if len(state.TextProbe) > 4000 {
+		state.TextProbe = state.TextProbe[len(state.TextProbe)-4000:]
+	}
+
+	probe := state.TextProbe
+	if len(probe) < 200 {
+		return false
+	}
+
+	if strings.Contains(probe, "BeadHub Coordination Rules") ||
+		strings.Contains(probe, "Project Context") ||
+		strings.Contains(probe, "Start Here (Every Session)") ||
+		strings.Contains(probe, "bdh :policy") ||
+		strings.Contains(probe, "AGENTS.md instructions") {
+		state.SuppressText = true
+		l.println("[suppressed prompt/policy echo]")
+		return true
+	}
+
+	return false
 }
 
 func (l *runLoop) idle(ctx context.Context, seconds int) error {
@@ -315,13 +372,13 @@ func (l *runLoop) idle(ctx context.Context, seconds int) error {
 	}
 
 	for remaining := seconds; remaining > 0; remaining-- {
-		l.printf("\rnext run in %ds", remaining)
+		l.renderIdleLine(remaining, nil)
 		if err := l.sleep(ctx, time.Second); err != nil {
-			l.print("\r                \r")
+			l.clearStatusLine()
 			return err
 		}
 	}
-	l.print("\r                \r")
+	l.clearStatusLine()
 	return nil
 }
 
@@ -349,6 +406,9 @@ func (l *runLoop) waitForNextCycle(ctx context.Context, waitSeconds int, state *
 }
 
 func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {
+	l.setStatusLine("paused: /resume or type a prompt")
+	defer l.clearStatusLine()
+
 	for {
 		if state.StopRequested {
 			return context.Canceled
@@ -384,14 +444,15 @@ func (l *runLoop) idleWithControls(ctx context.Context, seconds int, state *runS
 	if seconds <= 0 {
 		return nil
 	}
+	defer l.clearStatusLine()
 
 	for remaining := seconds; remaining > 0; remaining-- {
-		l.printf("\rnext run in %ds", remaining)
+		l.renderIdleLine(remaining, state)
 
 		select {
 		case event := <-l.controlEvents():
 			l.applyControlEvent(event, state, false, nil)
-			l.print("\r                \r")
+			l.clearStatusLine()
 			if state.StopRequested {
 				return context.Canceled
 			}
@@ -403,17 +464,16 @@ func (l *runLoop) idleWithControls(ctx context.Context, seconds int, state *runS
 			}
 			remaining++
 		case <-ctx.Done():
-			l.print("\r                \r")
+			l.clearStatusLine()
 			return ctx.Err()
 		default:
 			if err := l.sleep(ctx, time.Second); err != nil {
-				l.print("\r                \r")
+				l.clearStatusLine()
 				return err
 			}
 		}
 	}
 
-	l.print("\r                \r")
 	return nil
 }
 
@@ -432,16 +492,24 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 			state.PauseAfterRun = true
 			l.println("\ninput pending: auto-dispatch will pause after this run.")
 		}
+		l.renderInputPrompt(state)
+	case runControlBufferUpdated:
+		state.InputBuffer = event.Text
+		state.PendingInput = strings.TrimSpace(event.Text) != ""
+		l.renderInputPrompt(state)
 	case runControlPrompt:
 		state.PendingInput = false
+		state.InputBuffer = ""
 		state.NextPrompt = strings.TrimSpace(event.Text)
 		state.Paused = false
 		if activeRun {
 			state.PauseAfterRun = true
 			l.printf("\nqueued prompt override: %s\n", truncateRunText(state.NextPrompt, 80))
 		}
+		l.renderInputPrompt(state)
 	case runControlWait:
 		state.PendingInput = false
+		state.InputBuffer = ""
 		state.PauseAfterRun = true
 		state.Paused = !activeRun
 		if activeRun {
@@ -451,12 +519,15 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		}
 	case runControlResume:
 		state.PendingInput = false
+		state.InputBuffer = ""
 		state.Paused = false
 		if activeRun {
 			state.PauseAfterRun = false
 		}
+		l.renderInputPrompt(state)
 	case runControlStop:
 		state.PendingInput = false
+		state.InputBuffer = ""
 		state.StopRequested = true
 		if cancel != nil {
 			cancel()
@@ -465,21 +536,88 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 }
 
 func (l *runLoop) print(text string) {
+	if l.screen != nil {
+		l.screen.AppendText(text)
+		return
+	}
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
 	fmt.Fprint(l.out, text)
 }
 
 func (l *runLoop) printf(format string, args ...any) {
+	if l.screen != nil {
+		l.screen.AppendText(fmt.Sprintf(format, args...))
+		return
+	}
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
 	fmt.Fprintf(l.out, format, args...)
 }
 
 func (l *runLoop) println(text string) {
+	if l.screen != nil {
+		l.screen.AppendLine(text)
+		return
+	}
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
 	fmt.Fprintln(l.out, text)
+}
+
+func (l *runLoop) renderInputPrompt(state *runState) {
+	if state == nil {
+		return
+	}
+	if !state.PendingInput && !state.Paused && strings.TrimSpace(state.InputBuffer) == "" {
+		if l.screen != nil {
+			l.screen.SetInputLine("input> ")
+		}
+		return
+	}
+
+	prompt := "input> " + state.InputBuffer
+	if state.Paused && strings.TrimSpace(state.InputBuffer) == "" {
+		prompt = "input> "
+	}
+
+	if l.screen != nil {
+		l.screen.SetInputLine(prompt)
+		return
+	}
+
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	fmt.Fprintf(l.out, "\r\033[K%s", prompt)
+}
+
+func (l *runLoop) renderIdleLine(remaining int, state *runState) {
+	line := fmt.Sprintf("next run in %ds", remaining)
+
+	if l.screen != nil {
+		l.screen.SetStatusLine(line)
+		l.renderInputPrompt(state)
+		return
+	}
+
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	if state != nil && strings.TrimSpace(state.InputBuffer) != "" {
+		line = fmt.Sprintf("%s  >  %s", line, state.InputBuffer)
+	}
+	fmt.Fprintf(l.out, "\r\033[K%s", line)
+}
+
+func (l *runLoop) setStatusLine(text string) {
+	if l.screen != nil {
+		l.screen.SetStatusLine(text)
+	}
+}
+
+func (l *runLoop) clearStatusLine() {
+	if l.screen != nil {
+		l.screen.ClearStatusLine()
+	}
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {

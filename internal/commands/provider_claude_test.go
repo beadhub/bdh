@@ -58,4 +58,30 @@ func TestClaudeProviderParseOutput(t *testing.T) {
 	if resultEvent.CostUSD == nil || *resultEvent.CostUSD != 0.0042 {
 		t.Fatalf("unexpected result cost: %#v", resultEvent.CostUSD)
 	}
+
+	systemEvent, err := provider.ParseOutput(`{"type":"system","subtype":"init","session_id":"abc123456789","cwd":"/tmp/project","model":"claude-opus"}`)
+	if err != nil {
+		t.Fatalf("ParseOutput system returned error: %v", err)
+	}
+	if systemEvent.Type != runEventSystem {
+		t.Fatalf("expected system event, got %#v", systemEvent)
+	}
+	if !containsText(systemEvent.Text, "session") || !containsText(systemEvent.Text, "cwd=") {
+		t.Fatalf("expected summarized system message, got %q", systemEvent.Text)
+	}
+}
+
+func TestClaudeProviderParseNestedSystemMessage(t *testing.T) {
+	provider := claudeProvider{}
+
+	systemEvent, err := provider.ParseOutput(`{"type":"system","message":{"session_id":"abc123456789","cwd":"/tmp/project","model":"claude-opus"}}`)
+	if err != nil {
+		t.Fatalf("ParseOutput nested system returned error: %v", err)
+	}
+	if systemEvent.Type != runEventSystem {
+		t.Fatalf("expected system event, got %#v", systemEvent)
+	}
+	if !containsText(systemEvent.Text, "session") || !containsText(systemEvent.Text, "cwd=") {
+		t.Fatalf("expected summarized nested system message, got %q", systemEvent.Text)
+	}
 }

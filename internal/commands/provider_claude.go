@@ -54,6 +54,7 @@ type claudeProvider struct{}
 
 type claudeEnvelope struct {
 	Type       string          `json:"type"`
+	Subtype    string          `json:"subtype"`
 	Event      claudeEvent     `json:"event"`
 	Message    json.RawMessage `json:"message"`
 	Content    any             `json:"content"`
@@ -63,6 +64,8 @@ type claudeEnvelope struct {
 	} `json:"stats"`
 	CostUSD *float64 `json:"cost_usd"`
 	Session string   `json:"session_id"`
+	CWD     string   `json:"cwd"`
+	Model   string   `json:"model"`
 }
 
 type claudeEvent struct {
@@ -161,8 +164,8 @@ func (claudeProvider) ParseOutput(line string) (*runEvent, error) {
 			Session:    envelope.Session,
 		}, nil
 	case "system":
-		var text string
-		if err := json.Unmarshal(envelope.Message, &text); err != nil {
+		text, err := claudeSystemEventText(envelope)
+		if err != nil {
 			return nil, err
 		}
 		return &runEvent{Type: runEventSystem, Text: text}, nil
@@ -209,4 +212,69 @@ func claudeToolResultText(content any) string {
 	default:
 		return fmt.Sprintf("%v", content)
 	}
+}
+
+func claudeSystemMessageText(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text, nil
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err == nil {
+		parts := make([]string, 0, 3)
+		if sessionID, _ := payload["session_id"].(string); strings.TrimSpace(sessionID) != "" {
+			parts = append(parts, fmt.Sprintf("session %s", truncateRunText(sessionID, 12)))
+		}
+		if cwd, _ := payload["cwd"].(string); strings.TrimSpace(cwd) != "" {
+			parts = append(parts, fmt.Sprintf("cwd=%s", truncateRunText(cwd, 40)))
+		}
+		if model, _ := payload["model"].(string); strings.TrimSpace(model) != "" {
+			parts = append(parts, fmt.Sprintf("model=%s", model))
+		}
+		if len(parts) == 0 {
+			return "session event", nil
+		}
+		return strings.Join(parts, "  "), nil
+	}
+
+	return "", nil
+}
+
+func claudeSystemEventText(envelope claudeEnvelope) (string, error) {
+	if len(envelope.Message) > 0 && string(envelope.Message) != "null" {
+		text, err := claudeSystemMessageText(envelope.Message)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(text) != "" {
+			return text, nil
+		}
+	}
+
+	parts := make([]string, 0, 4)
+	if subtype := strings.TrimSpace(envelope.Subtype); subtype != "" && subtype != "init" {
+		parts = append(parts, subtype)
+	}
+	if sessionID := strings.TrimSpace(envelope.Session); sessionID != "" {
+		parts = append(parts, fmt.Sprintf("session %s", truncateRunText(sessionID, 12)))
+	}
+	if cwd := strings.TrimSpace(envelope.CWD); cwd != "" {
+		parts = append(parts, fmt.Sprintf("cwd=%s", truncateRunText(cwd, 40)))
+	}
+	if model := strings.TrimSpace(envelope.Model); model != "" {
+		parts = append(parts, fmt.Sprintf("model=%s", model))
+	}
+	if len(parts) == 0 {
+		if subtype := strings.TrimSpace(envelope.Subtype); subtype != "" {
+			return subtype, nil
+		}
+		return "", nil
+	}
+
+	return strings.Join(parts, "  "), nil
 }
