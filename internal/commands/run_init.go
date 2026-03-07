@@ -11,12 +11,18 @@ import (
 	"strings"
 )
 
+const (
+	defaultRunInitBasePrompt  = "Coordinate through BeadHub. Prioritize pending chat and unread mail first, then continue the best available work. Keep teammates informed, make concrete progress, and leave changes in a reviewable state."
+	defaultRunInitCommsSuffix = "After handling the communication, return to the best available work if more work remains."
+)
+
 func initRunUserConfig(in io.Reader, out io.Writer, existing runUserConfig) error {
 	reader := bufio.NewReader(in)
 	current, err := resolveRunSettings(existing, false, 0, false, 0)
 	if err != nil {
 		return err
 	}
+	current = applySuggestedRunInitDefaults(existing, current)
 
 	fmt.Fprintln(out, "Configuring bdh :run. Press Enter to keep the current value. Enter '-' to clear a string field.")
 
@@ -55,6 +61,16 @@ func initRunUserConfig(in io.Reader, out io.Writer, existing runUserConfig) erro
 
 	fmt.Fprintf(out, "Wrote %s\n", path)
 	return nil
+}
+
+func applySuggestedRunInitDefaults(existing runUserConfig, current runResolvedSettings) runResolvedSettings {
+	if existing.BasePrompt == nil && strings.TrimSpace(current.BasePrompt) == "" {
+		current.BasePrompt = defaultRunInitBasePrompt
+	}
+	if existing.CommsPromptSuffix == nil && strings.TrimSpace(current.CommsPromptSuffix) == "" {
+		current.CommsPromptSuffix = defaultRunInitCommsSuffix
+	}
+	return current
 }
 
 func promptRunConfigString(reader *bufio.Reader, out io.Writer, key string, current string) (*string, error) {
