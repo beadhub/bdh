@@ -14,7 +14,7 @@ func TestLoadRunUserConfigMissingReturnsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadRunUserConfig returned error: %v", err)
 	}
-	if cfg.WaitSeconds != nil || cfg.IdleWaitSeconds != nil {
+	if cfg.BasePrompt != nil || cfg.WorkPromptSuffix != nil || cfg.CommsPromptSuffix != nil || cfg.WaitSeconds != nil || cfg.IdleWaitSeconds != nil {
 		t.Fatalf("expected zero config, got %#v", cfg)
 	}
 }
@@ -26,7 +26,7 @@ func TestLoadRunUserConfigReadsFile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir failed: %v", err)
 	}
-	if err := os.WriteFile(path, []byte(`{"wait_seconds":11,"idle_wait_seconds":44}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"base_prompt":"coordinate with grace","work_prompt_suffix":"review before close","comms_prompt_suffix":"return to your current work after handling comms","wait_seconds":11,"idle_wait_seconds":44}`), 0o600); err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
 
@@ -40,14 +40,29 @@ func TestLoadRunUserConfigReadsFile(t *testing.T) {
 	if cfg.IdleWaitSeconds == nil || *cfg.IdleWaitSeconds != 44 {
 		t.Fatalf("expected idle_wait_seconds=44, got %#v", cfg.IdleWaitSeconds)
 	}
+	if cfg.BasePrompt == nil || *cfg.BasePrompt != "coordinate with grace" {
+		t.Fatalf("expected base_prompt, got %#v", cfg.BasePrompt)
+	}
+	if cfg.WorkPromptSuffix == nil || *cfg.WorkPromptSuffix != "review before close" {
+		t.Fatalf("expected work_prompt_suffix, got %#v", cfg.WorkPromptSuffix)
+	}
+	if cfg.CommsPromptSuffix == nil || *cfg.CommsPromptSuffix != "return to your current work after handling comms" {
+		t.Fatalf("expected comms_prompt_suffix, got %#v", cfg.CommsPromptSuffix)
+	}
 }
 
 func TestResolveRunSettingsPrecedence(t *testing.T) {
 	wait := 9
 	idleWait := 41
+	basePrompt := "config base"
+	workSuffix := "config work suffix"
+	commsSuffix := "config comms suffix"
 	cfg := runUserConfig{
-		WaitSeconds:     &wait,
-		IdleWaitSeconds: &idleWait,
+		BasePrompt:        &basePrompt,
+		WorkPromptSuffix:  &workSuffix,
+		CommsPromptSuffix: &commsSuffix,
+		WaitSeconds:       &wait,
+		IdleWaitSeconds:   &idleWait,
 	}
 
 	settings, err := resolveRunSettings(cfg, true, 7, true, 13)
@@ -59,5 +74,14 @@ func TestResolveRunSettingsPrecedence(t *testing.T) {
 	}
 	if settings.IdleWaitSeconds != 13 {
 		t.Fatalf("expected flag idle wait to win, got %d", settings.IdleWaitSeconds)
+	}
+	if settings.BasePrompt != "config base" {
+		t.Fatalf("expected base prompt from config, got %q", settings.BasePrompt)
+	}
+	if settings.WorkPromptSuffix != "config work suffix" {
+		t.Fatalf("expected work suffix from config, got %q", settings.WorkPromptSuffix)
+	}
+	if settings.CommsPromptSuffix != "config comms suffix" {
+		t.Fatalf("expected comms suffix from config, got %q", settings.CommsPromptSuffix)
 	}
 }

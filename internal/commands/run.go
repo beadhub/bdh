@@ -76,6 +76,7 @@ var (
 	runModel        string
 	runProviderName string
 	runIgnoreBeads  bool
+	runInitConfig   bool
 )
 
 var runCmd = &cobra.Command{
@@ -102,6 +103,9 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		if err != nil {
 			return err
 		}
+		if runInitConfig {
+			return initRunUserConfig(cmd.InOrStdin(), cmd.OutOrStdout(), runCfg)
+		}
 		settings, err := resolveRunSettings(
 			runCfg,
 			cmd.Flags().Changed("wait"), runWaitSeconds,
@@ -117,8 +121,12 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		}
 
 		dispatchDefaults := runDispatchDefaults{
-			IdleWaitSeconds: settings.IdleWaitSeconds,
-			IgnoreBeads:     runIgnoreBeads,
+			IdleWaitSeconds:      settings.IdleWaitSeconds,
+			IgnoreBeads:          runIgnoreBeads,
+			WorkPromptSuffix:     settings.WorkPromptSuffix,
+			CommsPromptSuffix:    settings.CommsPromptSuffix,
+			HasWorkPromptSuffix:  true,
+			HasCommsPromptSuffix: true,
 		}
 
 		var dispatcher runDispatcher
@@ -147,7 +155,7 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		}
 
 		opts := runLoopOptions{
-			Prompt:       strings.Join(args, " "),
+			Prompt:       firstNonEmpty(strings.Join(args, " "), settings.BasePrompt),
 			WaitSeconds:  settings.WaitSeconds,
 			MaxRuns:      runMaxRuns,
 			SessionMode:  runSessionMode,
@@ -174,6 +182,7 @@ func init() {
 	runCmd.Flags().StringVar(&runModel, "model", "", "Provider-specific model override")
 	runCmd.Flags().StringVar(&runProviderName, "provider", "claude", "Agent provider to run")
 	runCmd.Flags().BoolVar(&runIgnoreBeads, "ignore-beads", false, "Ignore claims and ready beads; only wake for incoming chat or unread mail")
+	runCmd.Flags().BoolVar(&runInitConfig, "init", false, "Prompt for ~/.config/beadhub/run.json values and write them")
 }
 
 func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
@@ -324,7 +333,7 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 		case err := <-errCh:
 			l.drainPendingControlEvents(state)
 			state.RanOnce = true
-			if state.RunInterrupted && (runCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			if state.RunInterrupted {
 				state.RunInterrupted = false
 				return nil
 			}
@@ -713,6 +722,15 @@ func resolveRunMissionPrompt(basePrompt string, overridePrompt string) string {
 		return overridePrompt
 	}
 	return strings.TrimSpace(basePrompt)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func composeRunPrompt(missionPrompt string, cyclePrompt string) string {
