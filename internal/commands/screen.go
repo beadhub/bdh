@@ -72,6 +72,8 @@ type runScreenStyles struct {
 	hint      lipgloss.Style
 }
 
+const runScreenBottomChromeLines = 4
+
 func newRunScreenManager(in io.Reader, out io.Writer) *runScreenManager {
 	inputFile, ok := in.(*os.File)
 	if !ok || !term.IsTerminal(int(inputFile.Fd())) {
@@ -397,7 +399,7 @@ func (m runScreenModel) View() string {
 	}
 
 	status := m.styles.status.Width(m.width).Render(m.statusText())
-	return m.viewport.View() + "\n" + status + "\n" + m.input.View()
+	return m.viewport.View() + "\n\n" + status + "\n\n" + m.input.View()
 }
 
 func (m *runScreenModel) syncLayout() {
@@ -405,7 +407,7 @@ func (m *runScreenModel) syncLayout() {
 		return
 	}
 
-	outputHeight := m.height - 2
+	outputHeight := m.height - runScreenBottomChromeLines
 	if outputHeight < 1 {
 		outputHeight = 1
 	}
