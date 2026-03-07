@@ -63,33 +63,40 @@ func TestParseRunControlSubmission(t *testing.T) {
 }
 
 func TestRunInputValueFromLinePreservesSpaces(t *testing.T) {
-	got := runInputValueFromLine("beadhub:noah> hello world ", "beadhub:noah> ")
+	got := runInputValueFromLine("beadhub:bdh:noah> hello world ", "beadhub:bdh:noah> ")
 	if got != "hello world " {
 		t.Fatalf("expected trailing/internal spaces to be preserved, got %q", got)
 	}
 
-	got = runInputValueFromLine("beadhub:noah>  leading", "beadhub:noah> ")
+	got = runInputValueFromLine("beadhub:bdh:noah>  leading", "beadhub:bdh:noah> ")
 	if got != " leading" {
 		t.Fatalf("expected leading spaces after prompt to be preserved, got %q", got)
 	}
 }
 
 func TestRunScreenSetInputLineKeepsLeadingSpace(t *testing.T) {
-	screen := &runScreenManager{promptLabel: "beadhub:noah> "}
+	screen := &runScreenManager{promptLabel: "beadhub:bdh:noah> "}
 
-	screen.SetInputLine("beadhub:noah>  leading")
+	screen.SetInputLine("beadhub:bdh:noah>  leading")
 
 	if !screen.pending {
 		t.Fatal("expected leading-space input to count as pending")
 	}
-	if screen.inputLine != "beadhub:noah>  leading" {
+	if screen.inputLine != "beadhub:bdh:noah>  leading" {
 		t.Fatalf("expected input line to preserve leading space, got %q", screen.inputLine)
 	}
 }
 
-func TestRunIdentityPromptLabelUsesProjectAndAlias(t *testing.T) {
-	got := runIdentityPromptLabel("beadhub", "noah")
-	if got != "beadhub:noah> " {
+func TestRunIdentityPromptLabelUsesProjectRepoAndAlias(t *testing.T) {
+	got := runIdentityPromptLabel("beadhub", "github.com/beadhub/bdh", "", "noah")
+	if got != "beadhub:bdh:noah> " {
 		t.Fatalf("expected identity prompt label, got %q", got)
+	}
+}
+
+func TestRunShortRepoNameFallsBackToRepoOrigin(t *testing.T) {
+	got := runShortRepoName("", "git@github.com:beadhub/bdh.git")
+	if got != "bdh" {
+		t.Fatalf("expected repo short name from repo origin, got %q", got)
 	}
 }

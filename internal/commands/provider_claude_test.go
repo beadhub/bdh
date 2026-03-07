@@ -15,7 +15,7 @@ func TestClaudeProviderBuildCommand(t *testing.T) {
 	}
 
 	joined := joinArgs(command)
-	if !containsText(joined, "claude -p fix the bug") {
+	if !containsText(joined, "claude -c -p fix the bug") {
 		t.Fatalf("expected base command, got: %q", joined)
 	}
 	if !containsText(joined, "--dangerously-skip-permissions") {

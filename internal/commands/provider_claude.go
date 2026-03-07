@@ -95,6 +95,7 @@ func (claudeProvider) BuildCommand(prompt string, opts runBuildOptions) ([]strin
 
 	command := []string{
 		"claude",
+		"-c",
 		"-p",
 		prompt,
 		"--dangerously-skip-permissions",

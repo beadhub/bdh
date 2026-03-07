@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type noResumeProvider struct{ claudeProvider }
@@ -906,6 +908,27 @@ func TestRenderIdleLineUsesStatusAreaOnScreen(t *testing.T) {
 	}
 	if screen.inputLine != defaultRunInputPromptLabel+"/resume soon" {
 		t.Fatalf("expected input line to remain separate, got %q", screen.inputLine)
+	}
+}
+
+func TestRenderInputPromptDoesNotRewriteActiveScreenInput(t *testing.T) {
+	screen := &runScreenManager{
+		promptLabel: "beadhub:bdh:noah> ",
+		inputLine:   "beadhub:bdh:noah> typed text",
+		program:     &tea.Program{},
+	}
+	loop := &runLoop{
+		screen:           screen,
+		inputPromptLabel: "beadhub:bdh:noah> ",
+	}
+
+	loop.renderInputPrompt(&runState{
+		PendingInput: true,
+		InputBuffer:  "stale text",
+	})
+
+	if screen.inputLine != "beadhub:bdh:noah> typed text" {
+		t.Fatalf("expected active screen input to remain untouched, got %q", screen.inputLine)
 	}
 }
 
