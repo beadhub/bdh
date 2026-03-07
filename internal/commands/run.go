@@ -76,6 +76,7 @@ var (
 	runModel        string
 	runProviderName string
 	runIgnoreBeads  bool
+	runInitConfig   bool
 )
 
 var runCmd = &cobra.Command{
@@ -101,6 +102,9 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		runCfg, err := loadRunUserConfig()
 		if err != nil {
 			return err
+		}
+		if runInitConfig {
+			return initRunUserConfig(cmd.InOrStdin(), cmd.OutOrStdout(), runCfg)
 		}
 		settings, err := resolveRunSettings(
 			runCfg,
@@ -178,6 +182,7 @@ func init() {
 	runCmd.Flags().StringVar(&runModel, "model", "", "Provider-specific model override")
 	runCmd.Flags().StringVar(&runProviderName, "provider", "claude", "Agent provider to run")
 	runCmd.Flags().BoolVar(&runIgnoreBeads, "ignore-beads", false, "Ignore claims and ready beads; only wake for incoming chat or unread mail")
+	runCmd.Flags().BoolVar(&runInitConfig, "init", false, "Prompt for ~/.config/beadhub/run.json values and write them")
 }
 
 func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
@@ -328,7 +333,7 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 		case err := <-errCh:
 			l.drainPendingControlEvents(state)
 			state.RanOnce = true
-			if state.RunInterrupted && (runCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			if state.RunInterrupted {
 				state.RunInterrupted = false
 				return nil
 			}

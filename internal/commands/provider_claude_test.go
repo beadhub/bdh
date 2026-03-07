@@ -18,6 +18,9 @@ func TestClaudeProviderBuildCommand(t *testing.T) {
 	if !containsText(joined, "claude -p fix the bug") {
 		t.Fatalf("expected base command, got: %q", joined)
 	}
+	if !containsText(joined, "--dangerously-skip-permissions") {
+		t.Fatalf("expected skip permissions flag, got: %q", joined)
+	}
 	if !containsText(joined, "--resume sess-1") {
 		t.Fatalf("expected resume flag, got: %q", joined)
 	}
