@@ -322,7 +322,7 @@ func newRunScreenModel(
 func newRunScreenStyles() runScreenStyles {
 	return runScreenStyles{
 		runHeader: lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "24", Dark: "12"}).Bold(true),
-		tool:      lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "18", Dark: "11"}),
+		tool:      lipgloss.NewStyle().Bold(true),
 		result:    lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "23", Dark: "14"}),
 		done:      lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "10"}).Bold(true),
 		info:      lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "8"}),
