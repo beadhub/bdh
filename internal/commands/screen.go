@@ -167,20 +167,47 @@ func (s *runScreenManager) renderLocked() error {
 		lines = lines[len(lines)-outputHeight:]
 	}
 
+	frame := s.renderFrame(width, height)
+	_, err = fmt.Fprint(s.file, frame)
+	return err
+}
+
+func (s *runScreenManager) renderFrame(width, height int) string {
+	if width <= 0 {
+		width = 120
+	}
+	if height <= 0 {
+		height = 24
+	}
+
+	outputHeight := height - 2
+	if outputHeight < 1 {
+		outputHeight = 1
+	}
+
+	lines := make([]string, 0, len(s.lines)+1)
+	lines = append(lines, s.lines...)
+	if s.current != "" {
+		lines = append(lines, s.current)
+	}
+	if len(lines) > outputHeight {
+		lines = lines[len(lines)-outputHeight:]
+	}
+
 	var b strings.Builder
 	b.WriteString("\033[H\033[2J")
 	for i := 0; i < outputHeight; i++ {
+		if i > 0 {
+			b.WriteString("\r\n")
+		}
 		if i < len(lines) {
 			b.WriteString(truncateRunText(lines[i], width))
 		}
 		b.WriteString("\033[K")
-		if i < outputHeight-1 {
-			b.WriteByte('\n')
-		}
 	}
-	b.WriteByte('\n')
+	b.WriteString("\r\n")
 	b.WriteString(truncateRunText(s.statusLine, width))
-	b.WriteString("\033[K\n")
+	b.WriteString("\033[K\r\n")
 	b.WriteString(truncateRunText(s.inputLine, width))
 	b.WriteString("\033[K")
 	cursorCol := len(truncateRunText(s.inputLine, width)) + 1
@@ -188,6 +215,5 @@ func (s *runScreenManager) renderLocked() error {
 		cursorCol = width
 	}
 	b.WriteString(fmt.Sprintf("\033[%d;%dH", height, cursorCol))
-	_, err = fmt.Fprint(s.file, b.String())
-	return err
+	return b.String()
 }
