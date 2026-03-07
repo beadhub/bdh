@@ -26,7 +26,7 @@ func TestStyleRunScreenLineCategories(t *testing.T) {
 		want string
 	}{
 		{line: "run #1  12:00:00  >  prompt", want: "run_header"},
-		{line: `tool: Bash("go test ./... 2>&1")`, want: "tool"},
+		{line: `- Bash("go test ./... 2>&1")`, want: "tool"},
 		{line: "  -> ok", want: "result"},
 		{line: "done  2.1s", want: "done"},
 		{line: "info: session", want: "info"},
@@ -109,6 +109,18 @@ func TestWrapRunScreenLineWrapsLongToolFields(t *testing.T) {
 	for _, line := range lines[1:] {
 		if line == "" || line[:2] != "  " {
 			t.Fatalf("expected wrapped continuation lines to keep indentation, got %#v", lines)
+		}
+	}
+}
+
+func TestWrapRunScreenLineKeepsToolArgIndent(t *testing.T) {
+	lines := wrapRunScreenLine(`       file_path="/Users/juanre/prj/beadhub-all/beadhub/src/beadhub/routes/tasks.py",`, 40)
+	if len(lines) < 2 {
+		t.Fatalf("expected wrapped lines, got %#v", lines)
+	}
+	for _, line := range lines[1:] {
+		if line == "" || line[:7] != "       " {
+			t.Fatalf("expected wrapped continuation lines to keep tool arg indentation, got %#v", lines)
 		}
 	}
 }

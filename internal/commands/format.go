@@ -27,20 +27,34 @@ func formatRunToolInput(data map[string]any) string {
 }
 
 func formatRunToolCallLines(call runToolCall) []string {
-	summary, description := formatRunToolCall(call.Name, call.Input)
-	if description == "" {
-		return []string{summary}
+	args := formatRunToolSummaryArgs(call.Input)
+	lines := formatRunToolSummaryLines(call.Name, args)
+	if description := formatRunToolDescription(call.Input); description != "" {
+		lines = append(lines, "  "+description)
 	}
-	return []string{summary, "      " + description}
+	return lines
 }
 
-func formatRunToolCall(name string, data map[string]any) (string, string) {
-	description := formatRunToolDescription(data)
-	args := formatRunToolSummaryArgs(data)
+func formatRunToolSummaryLines(name string, args []string) []string {
+	prefix := fmt.Sprintf("- %s(", name)
 	if len(args) == 0 {
-		return fmt.Sprintf("tool: %s", name), description
+		return []string{prefix + ")"}
 	}
-	return fmt.Sprintf("tool: %s(%s)", name, strings.Join(args, ", ")), description
+
+	indent := strings.Repeat(" ", len(prefix))
+	lines := make([]string, 0, len(args))
+	for i, arg := range args {
+		suffix := ","
+		if i == len(args)-1 {
+			suffix = ")"
+		}
+		if i == 0 {
+			lines = append(lines, prefix+arg+suffix)
+			continue
+		}
+		lines = append(lines, indent+arg+suffix)
+	}
+	return lines
 }
 
 func formatRunToolDescription(data map[string]any) string {
@@ -74,10 +88,6 @@ func formatRunToolSummaryArgs(data map[string]any) []string {
 	for index, key := range keys {
 		value := data[key]
 		formattedValue := formatRunToolSummaryValue(value)
-		if index == 0 && len(keys) == 1 && runToolSummaryCanOmitKey(key, value) {
-			args = append(args, formattedValue)
-			continue
-		}
 		if index == 0 && runToolSummaryCanOmitKey(key, value) {
 			args = append(args, formattedValue)
 			continue

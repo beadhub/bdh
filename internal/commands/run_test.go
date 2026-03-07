@@ -154,7 +154,7 @@ func TestRunLoopFormatsOutput(t *testing.T) {
 	if !strings.Contains(text, "Thinking...") {
 		t.Fatalf("expected streamed text, got: %q", text)
 	}
-	if !strings.Contains(text, `tool: exec_command("pwd")`) {
+	if !strings.Contains(text, `- exec_command("pwd")`) {
 		t.Fatalf("expected tool call output, got: %q", text)
 	}
 	if !strings.Contains(text, "-> ok") {
