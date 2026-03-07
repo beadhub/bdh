@@ -40,7 +40,7 @@ type runLoopOptions struct {
 	Prompt              string
 	WaitSeconds         int
 	MaxRuns             int
-	SessionMode         bool
+	ContinueMode        bool
 	WorkingDir          string
 	AllowedTools        string
 	Model               string
@@ -76,7 +76,7 @@ type runState struct {
 
 var (
 	runWaitSeconds  int
-	runSessionMode  bool
+	runContinueMode bool
 	runMaxRuns      int
 	runIdleWait     int
 	runBasePrompt   string
@@ -99,7 +99,7 @@ var runCmd = &cobra.Command{
 Current implementation includes:
   - repeated claude -p invocations
   - stream-json parsing and formatted output
-  - session continuity when requested
+  - provider session continuity when --continue is requested
   - /stop, /wait, /resume, /quit, and prompt override controls
   - bdh-driven dispatch between runs (chat, mail, claims, ready work)
   - adaptive wait behavior based on dispatch priority
@@ -182,7 +182,7 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 			Prompt:        settings.BasePrompt,
 			WaitSeconds:   settings.WaitSeconds,
 			MaxRuns:       runMaxRuns,
-			SessionMode:   runSessionMode,
+			ContinueMode:  runContinueMode,
 			WorkingDir:    runWorkingDir,
 			AllowedTools:  runAllowedTools,
 			Model:         runModel,
@@ -205,7 +205,9 @@ func init() {
 	runCmd.Flags().IntVar(&runWaitSeconds, "wait", defaultRunWaitSeconds, "Idle seconds between runs")
 	runCmd.Flags().IntVar(&runIdleWait, "idle-wait", defaultRunIdleWaitSeconds, "Idle seconds between runs when nothing needs attention")
 	runCmd.Flags().IntVar(&runCompactPct, "compact-threshold-pct", defaultRunCompactThreshold, "Run /compact after a successful cycle when context usage exceeds this percent (0 disables)")
-	runCmd.Flags().BoolVar(&runSessionMode, "session", false, "Resume the same provider session across runs")
+	runCmd.Flags().BoolVar(&runContinueMode, "continue", false, "Continue the most recent provider session across runs")
+	runCmd.Flags().BoolVar(&runContinueMode, "session", false, "Deprecated alias for --continue")
+	_ = runCmd.Flags().MarkDeprecated("session", "use --continue instead")
 	runCmd.Flags().IntVar(&runMaxRuns, "max-runs", 0, "Stop after N runs (0 means infinite)")
 	runCmd.Flags().StringVar(&runWorkingDir, "dir", "", "Working directory for the agent process")
 	runCmd.Flags().StringVar(&runAllowedTools, "allowed-tools", "", "Provider-specific allowed tools string")
@@ -361,12 +363,8 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 		AllowedTools: opts.AllowedTools,
 		Model:        opts.Model,
 	}
-	if opts.SessionMode {
-		if state.SessionID != "" && l.provider.Capabilities().SupportsResume {
-			buildOpts.SessionID = state.SessionID
-		} else if state.RanOnce && l.provider.Capabilities().SupportsContinue {
-			buildOpts.ContinueSession = true
-		}
+	if opts.ContinueMode {
+		buildOpts.ContinueSession = true
 	}
 
 	argv, err := l.provider.BuildCommand(prompt, buildOpts)

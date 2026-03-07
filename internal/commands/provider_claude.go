@@ -31,7 +31,6 @@ func (s runUsageStats) ContextPct() float64 {
 }
 
 type runBuildOptions struct {
-	SessionID       string
 	ContinueSession bool
 	AllowedTools    string
 	Model           string
@@ -119,7 +118,6 @@ func (claudeProvider) BuildCommand(prompt string, opts runBuildOptions) ([]strin
 
 	command := []string{
 		"claude",
-		"-c",
 		"-p",
 		prompt,
 		"--dangerously-skip-permissions",
@@ -129,9 +127,7 @@ func (claudeProvider) BuildCommand(prompt string, opts runBuildOptions) ([]strin
 		"--include-partial-messages",
 	}
 
-	if opts.SessionID != "" {
-		command = append(command, "--resume", opts.SessionID)
-	} else if opts.ContinueSession {
+	if opts.ContinueSession {
 		command = append(command, "--continue")
 	}
 	if strings.TrimSpace(opts.AllowedTools) != "" {

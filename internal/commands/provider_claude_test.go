@@ -6,7 +6,6 @@ func TestClaudeProviderBuildCommand(t *testing.T) {
 	provider := claudeProvider{}
 
 	command, err := provider.BuildCommand("fix the bug", runBuildOptions{
-		SessionID:    "sess-1",
 		AllowedTools: "exec_command,apply_patch",
 		Model:        "claude-sonnet-4",
 	})
@@ -15,20 +14,36 @@ func TestClaudeProviderBuildCommand(t *testing.T) {
 	}
 
 	joined := joinArgs(command)
-	if !containsText(joined, "claude -c -p fix the bug") {
+	if !containsText(joined, "claude -p fix the bug") {
 		t.Fatalf("expected base command, got: %q", joined)
 	}
 	if !containsText(joined, "--dangerously-skip-permissions") {
 		t.Fatalf("expected skip permissions flag, got: %q", joined)
 	}
-	if !containsText(joined, "--resume sess-1") {
-		t.Fatalf("expected resume flag, got: %q", joined)
+	if containsText(joined, "--continue") {
+		t.Fatalf("did not expect continue flag by default, got: %q", joined)
 	}
 	if !containsText(joined, "--allowedTools exec_command,apply_patch") {
 		t.Fatalf("expected allowedTools flag, got: %q", joined)
 	}
 	if !containsText(joined, "--model claude-sonnet-4") {
 		t.Fatalf("expected model flag, got: %q", joined)
+	}
+}
+
+func TestClaudeProviderBuildCommandWithContinue(t *testing.T) {
+	provider := claudeProvider{}
+
+	command, err := provider.BuildCommand("fix the bug", runBuildOptions{
+		ContinueSession: true,
+	})
+	if err != nil {
+		t.Fatalf("BuildCommand returned error: %v", err)
+	}
+
+	joined := joinArgs(command)
+	if !containsText(joined, "--continue") {
+		t.Fatalf("expected continue flag, got: %q", joined)
 	}
 }
 

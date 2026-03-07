@@ -12,8 +12,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type noResumeProvider struct{ claudeProvider }
-
 type fakeRunInputController struct {
 	events  chan runControlEvent
 	mu      sync.Mutex
@@ -41,10 +39,9 @@ func (f *fakeRunInputController) setPending(pending bool) {
 	f.pending = pending
 }
 
-func TestRunLoopUsesResumeOnSecondRun(t *testing.T) {
+func TestRunLoopStartsFreshWithoutContinueMode(t *testing.T) {
 	provider := claudeProvider{}
 	var commands [][]string
-	runCount := 0
 
 	loop := &runLoop{
 		provider: provider,
@@ -53,20 +50,14 @@ func TestRunLoopUsesResumeOnSecondRun(t *testing.T) {
 		out:      io.Discard,
 		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
 			commands = append(commands, append([]string(nil), argv...))
-			runCount++
-			if runCount == 1 {
-				onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
-				return nil
-			}
 			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
 
 	err := loop.Run(context.Background(), runLoopOptions{
-		Prompt:      "continue working",
-		SessionMode: true,
-		MaxRuns:     2,
+		Prompt:  "continue working",
+		MaxRuns: 2,
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -74,16 +65,16 @@ func TestRunLoopUsesResumeOnSecondRun(t *testing.T) {
 	if len(commands) != 2 {
 		t.Fatalf("expected 2 commands, got %d", len(commands))
 	}
-	if strings.Contains(strings.Join(commands[0], " "), "--resume") {
-		t.Fatalf("first run should not resume: %q", strings.Join(commands[0], " "))
+	if strings.Contains(strings.Join(commands[0], " "), "--continue") {
+		t.Fatalf("first run should start fresh: %q", strings.Join(commands[0], " "))
 	}
-	if !strings.Contains(strings.Join(commands[1], " "), "--resume sess-42") {
-		t.Fatalf("second run should resume previous session: %q", strings.Join(commands[1], " "))
+	if strings.Contains(strings.Join(commands[1], " "), "--continue") {
+		t.Fatalf("second run should also start fresh without continue mode: %q", strings.Join(commands[1], " "))
 	}
 }
 
-func TestRunLoopFallsBackToContinueWithoutSessionID(t *testing.T) {
-	provider := noResumeProvider{}
+func TestRunLoopUsesContinueWhenEnabled(t *testing.T) {
+	provider := claudeProvider{}
 	var commands [][]string
 
 	loop := &runLoop{
@@ -99,9 +90,9 @@ func TestRunLoopFallsBackToContinueWithoutSessionID(t *testing.T) {
 	}
 
 	err := loop.Run(context.Background(), runLoopOptions{
-		Prompt:      "continue working",
-		SessionMode: true,
-		MaxRuns:     2,
+		Prompt:       "continue working",
+		ContinueMode: true,
+		MaxRuns:      2,
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -109,15 +100,11 @@ func TestRunLoopFallsBackToContinueWithoutSessionID(t *testing.T) {
 	if len(commands) != 2 {
 		t.Fatalf("expected 2 commands, got %d", len(commands))
 	}
-	if !strings.Contains(strings.Join(commands[1], " "), "--continue") {
-		t.Fatalf("second run should use --continue fallback: %q", strings.Join(commands[1], " "))
+	if !strings.Contains(strings.Join(commands[0], " "), "--continue") {
+		t.Fatalf("first run should continue the most recent provider session: %q", strings.Join(commands[0], " "))
 	}
-}
-
-func (noResumeProvider) Capabilities() runProviderCapabilities {
-	return runProviderCapabilities{
-		SupportsResume:   false,
-		SupportsContinue: true,
+	if !strings.Contains(strings.Join(commands[1], " "), "--continue") {
+		t.Fatalf("second run should continue the provider session as well: %q", strings.Join(commands[1], " "))
 	}
 }
 
