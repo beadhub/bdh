@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -142,9 +140,7 @@ func startRunServiceProcess(ctx context.Context, dir string, service runServiceC
 	cmd.Dir = dir
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	if runtime.GOOS != "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
+	setRunServiceProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -170,15 +166,7 @@ func runServiceWatchContext(ctx context.Context, cmd *exec.Cmd, done <-chan stru
 }
 
 func stopRunServiceCommand(cmd *exec.Cmd) {
-	if cmd == nil || cmd.Process == nil {
-		return
-	}
-	if runtime.GOOS == "windows" {
-		_ = cmd.Process.Kill()
-		return
-	}
-	pid := cmd.Process.Pid
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	killRunServiceProcessGroup(cmd)
 }
 
 func defaultRunServiceShell() string {

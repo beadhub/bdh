@@ -504,6 +504,68 @@ func TestPassthrough_RejectsClaimWithError(t *testing.T) {
 	}
 }
 
+func TestPassthrough_RejectsClaimWhenOtherAgentHasBead(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+	os.Chdir(tmpDir)
+
+	setupBeadsDir(t)
+
+	// Server approves, but returns beads_in_progress showing another agent has the bead
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/bdh/command" {
+			json.NewEncoder(w).Encode(map[string]any{
+				"approved": true,
+				"context": map[string]any{
+					"beads_in_progress": []any{
+						map[string]any{
+							"bead_id":      "bd-42",
+							"workspace_id": "other-ws",
+							"alias":        "alice",
+							"human_name":   "Alice",
+						},
+					},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+		BeadhubURL:      server.URL,
+		ProjectSlug:     "test-project",
+		RepoID:          "c3d4e5f6-7890-12cd-ef01-345678901234",
+		RepoOrigin:      "git@github.com:test/repo.git",
+		CanonicalOrigin: "github.com/test/repo",
+		Alias:           "test-agent",
+		HumanName:       "Test Human",
+	}
+	cfg.Save()
+
+	for _, args := range [][]string{
+		{"update", "bd-42", "--claim"},
+		{"update", "bd-42", "--status", "in_progress"},
+	} {
+		result, err := runPassthrough(args)
+		if err != nil {
+			t.Fatalf("runPassthrough(%v) returned error: %v", args, err)
+		}
+		if !result.Rejected {
+			t.Errorf("runPassthrough(%v): expected rejection when another agent has the bead", args)
+		}
+		if !strings.Contains(result.RejectionReason, "alice") {
+			t.Errorf("runPassthrough(%v): rejection reason should mention alice, got: %q", args, result.RejectionReason)
+		}
+		if result.Stdout != "" || result.Stderr != "" {
+			t.Errorf("runPassthrough(%v): bd should not have run, got stdout: %q, stderr: %q", args, result.Stdout, result.Stderr)
+		}
+	}
+}
+
 func TestPassthrough_RunsBdWhenServerReturns5xx(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -1560,6 +1622,59 @@ func TestIsCloseCommand_FromArgs(t *testing.T) {
 			got := isCloseCommandFromArgs(tt.args)
 			if got != tt.want {
 				t.Errorf("isCloseCommandFromArgs(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsClaimCommand_FromArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{
+			name: "update with --claim",
+			args: []string{"update", "bd-42", "--claim"},
+			want: true,
+		},
+		{
+			name: "update with --status in_progress",
+			args: []string{"update", "bd-42", "--status", "in_progress"},
+			want: true,
+		},
+		{
+			name: "update with other status",
+			args: []string{"update", "bd-42", "--status", "open"},
+			want: false,
+		},
+		{
+			name: "close command",
+			args: []string{"close", "bd-42"},
+			want: false,
+		},
+		{
+			name: "show command",
+			args: []string{"show", "bd-42"},
+			want: false,
+		},
+		{
+			name: "empty args",
+			args: []string{},
+			want: false,
+		},
+		{
+			name: "update without flags",
+			args: []string{"update", "bd-42", "--title", "new title"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isClaimCommandFromArgs(tt.args)
+			if got != tt.want {
+				t.Errorf("isClaimCommandFromArgs(%v) = %v, want %v", tt.args, got, tt.want)
 			}
 		})
 	}
