@@ -216,6 +216,20 @@ func TestComposeRunPromptWithoutBaseUsesCycleOnly(t *testing.T) {
 	}
 }
 
+func TestComposeRunPromptWithServicesAddsSection(t *testing.T) {
+	got := composeRunPromptWithServices(
+		"chat with grace and coordinate",
+		"Respond to unread chat from grace.",
+		[]runServiceConfig{
+			{Name: "backend", Description: "Backend API server on http://localhost:8000"},
+			{Name: "frontend", Command: "make run-frontend"},
+		},
+	)
+	if !strings.Contains(got, "Services available:\n- backend: Backend API server on http://localhost:8000\n- frontend: make run-frontend") {
+		t.Fatalf("expected services section, got %q", got)
+	}
+}
+
 func TestRunLoopInitialPromptAppliesOnlyToFirstRun(t *testing.T) {
 	provider := claudeProvider{}
 	var commands [][]string

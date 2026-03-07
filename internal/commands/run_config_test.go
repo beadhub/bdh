@@ -57,6 +57,9 @@ func TestLoadRunUserConfigReadsFile(t *testing.T) {
 	if cfg.CommsPromptSuffix == nil || *cfg.CommsPromptSuffix != "return to your current work after handling comms" {
 		t.Fatalf("expected comms_prompt_suffix, got %#v", cfg.CommsPromptSuffix)
 	}
+	if len(cfg.Services) != 0 {
+		t.Fatalf("expected no services, got %#v", cfg.Services)
+	}
 }
 
 func TestLoadRunUserConfigLocalOverridesGlobal(t *testing.T) {
@@ -79,12 +82,12 @@ func TestLoadRunUserConfigLocalOverridesGlobal(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(globalPath), 0o755); err != nil {
 		t.Fatalf("mkdir global config failed: %v", err)
 	}
-	if err := os.WriteFile(globalPath, []byte(`{"base_prompt":"global base","work_prompt_suffix":"global work","wait_seconds":11,"idle_wait_seconds":44}`), 0o600); err != nil {
+	if err := os.WriteFile(globalPath, []byte(`{"base_prompt":"global base","work_prompt_suffix":"global work","wait_seconds":11,"idle_wait_seconds":44,"services":[{"name":"backend","command":"make run-backend","description":"Backend API"}]}`), 0o600); err != nil {
 		t.Fatalf("write global config failed: %v", err)
 	}
 
 	localPath := filepath.Join(workspaceRoot, ".beadhub-run.json")
-	if err := os.WriteFile(localPath, []byte(`{"base_prompt":"local base","comms_prompt_suffix":"local comms","idle_wait_seconds":9}`), 0o600); err != nil {
+	if err := os.WriteFile(localPath, []byte(`{"base_prompt":"local base","comms_prompt_suffix":"local comms","idle_wait_seconds":9,"services":[{"name":"frontend","command":"make run-frontend","description":"Frontend UI"}]}`), 0o600); err != nil {
 		t.Fatalf("write local config failed: %v", err)
 	}
 
@@ -106,6 +109,9 @@ func TestLoadRunUserConfigLocalOverridesGlobal(t *testing.T) {
 	}
 	if cfg.IdleWaitSeconds == nil || *cfg.IdleWaitSeconds != 9 {
 		t.Fatalf("expected local idle_wait_seconds to win, got %#v", cfg.IdleWaitSeconds)
+	}
+	if len(cfg.Services) != 1 || cfg.Services[0].Name != "frontend" {
+		t.Fatalf("expected local services to override global, got %#v", cfg.Services)
 	}
 }
 

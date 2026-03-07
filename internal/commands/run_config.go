@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/beadhub/bdh/internal/config"
 )
@@ -18,11 +19,12 @@ const (
 )
 
 type runUserConfig struct {
-	BasePrompt        *string `json:"base_prompt"`
-	WorkPromptSuffix  *string `json:"work_prompt_suffix"`
-	CommsPromptSuffix *string `json:"comms_prompt_suffix"`
-	WaitSeconds       *int    `json:"wait_seconds"`
-	IdleWaitSeconds   *int    `json:"idle_wait_seconds"`
+	BasePrompt        *string            `json:"base_prompt"`
+	WorkPromptSuffix  *string            `json:"work_prompt_suffix"`
+	CommsPromptSuffix *string            `json:"comms_prompt_suffix"`
+	WaitSeconds       *int               `json:"wait_seconds"`
+	IdleWaitSeconds   *int               `json:"idle_wait_seconds"`
+	Services          []runServiceConfig `json:"services"`
 }
 
 type runResolvedSettings struct {
@@ -31,6 +33,7 @@ type runResolvedSettings struct {
 	CommsPromptSuffix string
 	WaitSeconds       int
 	IdleWaitSeconds   int
+	Services          []runServiceConfig
 }
 
 func loadRunUserConfig() (runUserConfig, error) {
@@ -106,6 +109,9 @@ func mergeRunUserConfig(base runUserConfig, override runUserConfig) runUserConfi
 	if override.IdleWaitSeconds != nil {
 		merged.IdleWaitSeconds = override.IdleWaitSeconds
 	}
+	if override.Services != nil {
+		merged.Services = append([]runServiceConfig(nil), override.Services...)
+	}
 	return merged
 }
 
@@ -145,6 +151,9 @@ func resolveRunSettings(
 	if cfg.IdleWaitSeconds != nil {
 		settings.IdleWaitSeconds = *cfg.IdleWaitSeconds
 	}
+	if cfg.Services != nil {
+		settings.Services = append([]runServiceConfig(nil), cfg.Services...)
+	}
 	if basePromptFlagSet {
 		settings.BasePrompt = basePromptFlagValue
 	}
@@ -166,6 +175,14 @@ func resolveRunSettings(
 	}
 	if settings.IdleWaitSeconds < 0 {
 		return runResolvedSettings{}, fmt.Errorf("idle_wait_seconds must be >= 0")
+	}
+	for _, service := range settings.Services {
+		if strings.TrimSpace(service.Name) == "" {
+			return runResolvedSettings{}, fmt.Errorf("services.name must be non-empty")
+		}
+		if strings.TrimSpace(service.Command) == "" {
+			return runResolvedSettings{}, fmt.Errorf("services[%s].command must be non-empty", service.Name)
+		}
 	}
 
 	return settings, nil
