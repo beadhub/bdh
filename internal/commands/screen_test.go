@@ -46,6 +46,8 @@ func TestParseRunControlSubmission(t *testing.T) {
 		input string
 		want  runControlEventType
 	}{
+		{input: "/quit", want: runControlQuit},
+		{input: "/exit", want: runControlQuit},
 		{input: "/stop", want: runControlStop},
 		{input: "/wait", want: runControlWait},
 		{input: "/resume", want: runControlResume},

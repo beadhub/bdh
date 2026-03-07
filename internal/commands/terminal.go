@@ -8,6 +8,7 @@ const (
 	runControlTypingStarted runControlEventType = "typing_started"
 	runControlBufferUpdated runControlEventType = "buffer_updated"
 	runControlPrompt        runControlEventType = "prompt"
+	runControlQuit          runControlEventType = "quit"
 	runControlStop          runControlEventType = "stop"
 	runControlWait          runControlEventType = "wait"
 	runControlResume        runControlEventType = "resume"
@@ -28,6 +29,8 @@ type runInputController interface {
 func parseRunControlSubmission(text string) runControlEvent {
 	text = strings.TrimSpace(text)
 	switch text {
+	case "/quit", "/exit":
+		return runControlEvent{Type: runControlQuit}
 	case "/stop":
 		return runControlEvent{Type: runControlStop}
 	case "/wait":
