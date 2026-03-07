@@ -35,13 +35,14 @@ type runLoop struct {
 }
 
 type runLoopOptions struct {
-	Prompt       string
-	WaitSeconds  int
-	MaxRuns      int
-	SessionMode  bool
-	WorkingDir   string
-	AllowedTools string
-	Model        string
+	InitialPrompt string
+	Prompt        string
+	WaitSeconds   int
+	MaxRuns       int
+	SessionMode   bool
+	WorkingDir    string
+	AllowedTools  string
+	Model         string
 }
 
 type runCycleDecision struct {
@@ -169,13 +170,14 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		}
 
 		opts := runLoopOptions{
-			Prompt:       firstNonEmpty(strings.Join(args, " "), settings.BasePrompt),
-			WaitSeconds:  settings.WaitSeconds,
-			MaxRuns:      runMaxRuns,
-			SessionMode:  runSessionMode,
-			WorkingDir:   runWorkingDir,
-			AllowedTools: runAllowedTools,
-			Model:        runModel,
+			InitialPrompt: strings.TrimSpace(strings.Join(args, " ")),
+			Prompt:        settings.BasePrompt,
+			WaitSeconds:   settings.WaitSeconds,
+			MaxRuns:       runMaxRuns,
+			SessionMode:   runSessionMode,
+			WorkingDir:    runWorkingDir,
+			AllowedTools:  runAllowedTools,
+			Model:         runModel,
 		}
 
 		err = loop.Run(ctx, opts)
@@ -203,7 +205,7 @@ func init() {
 }
 
 func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
-	if l.dispatch == nil && strings.TrimSpace(opts.Prompt) == "" {
+	if l.dispatch == nil && strings.TrimSpace(opts.Prompt) == "" && strings.TrimSpace(opts.InitialPrompt) == "" {
 		return fmt.Errorf("prompt cannot be empty when dispatch is unavailable")
 	}
 
@@ -241,10 +243,18 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 			continue
 		}
 
-		missionPrompt := resolveRunMissionPrompt(opts.Prompt, decision.MissionPrompt)
+		baseMissionPrompt := strings.TrimSpace(opts.Prompt)
+		if state.Run == 0 && strings.TrimSpace(opts.InitialPrompt) != "" {
+			baseMissionPrompt = strings.TrimSpace(opts.InitialPrompt)
+		}
+		missionPrompt := resolveRunMissionPrompt(baseMissionPrompt, decision.MissionPrompt)
 		prompt := composeRunPrompt(missionPrompt, decision.Prompt)
 		displayPrompt := runDisplayPrompt(missionPrompt, decision.Prompt)
 		if strings.TrimSpace(prompt) == "" {
+			if l.dispatch == nil && state.Run > 0 && strings.TrimSpace(opts.Prompt) == "" && strings.TrimSpace(opts.InitialPrompt) != "" {
+				l.println("done: initial prompt consumed; use --base-prompt for a persistent mission.")
+				return nil
+			}
 			return fmt.Errorf("prompt cannot be empty")
 		}
 		state.Run++

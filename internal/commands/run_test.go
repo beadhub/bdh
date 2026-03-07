@@ -180,6 +180,77 @@ func TestComposeRunPromptWithoutBaseUsesCycleOnly(t *testing.T) {
 	}
 }
 
+func TestRunLoopInitialPromptAppliesOnlyToFirstRun(t *testing.T) {
+	provider := claudeProvider{}
+	var commands [][]string
+
+	loop := &runLoop{
+		provider: provider,
+		now:      func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) },
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		out:      io.Discard,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+			commands = append(commands, append([]string(nil), argv...))
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		InitialPrompt: "first-run mission",
+		Prompt:        "persistent mission",
+		MaxRuns:       2,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(commands) != 2 {
+		t.Fatalf("expected 2 commands, got %d", len(commands))
+	}
+	first := strings.Join(commands[0], " ")
+	second := strings.Join(commands[1], " ")
+	if !strings.Contains(first, "first-run mission") {
+		t.Fatalf("expected first run to use initial prompt, got %q", first)
+	}
+	if strings.Contains(first, "persistent mission") {
+		t.Fatalf("expected first run not to use persistent base prompt, got %q", first)
+	}
+	if !strings.Contains(second, "persistent mission") {
+		t.Fatalf("expected second run to use persistent base prompt, got %q", second)
+	}
+}
+
+func TestRunLoopStopsAfterOneRunWhenOnlyInitialPromptExistsWithoutDispatch(t *testing.T) {
+	var output strings.Builder
+	runCount := 0
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      &output,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+			runCount++
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		InitialPrompt: "one-shot mission",
+		WaitSeconds:   0,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if runCount != 1 {
+		t.Fatalf("expected exactly one run, got %d", runCount)
+	}
+	if !strings.Contains(output.String(), "done: initial prompt consumed; use --base-prompt for a persistent mission.") {
+		t.Fatalf("expected completion notice, got %q", output.String())
+	}
+}
+
 func TestResolveRunMissionPromptPrefersOneRunOverride(t *testing.T) {
 	got := resolveRunMissionPrompt("persistent mission", "one-run override")
 	if got != "one-run override" {
