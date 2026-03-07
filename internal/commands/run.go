@@ -322,7 +322,7 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 		case err := <-errCh:
 			l.drainPendingControlEvents(state)
 			state.RanOnce = true
-			if state.RunInterrupted && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			if state.RunInterrupted && (runCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 				state.RunInterrupted = false
 				return nil
 			}
@@ -784,10 +784,16 @@ func realRunCommand(ctx context.Context, dir string, argv []string, onLine func(
 	}
 	if err := scanner.Err(); err != nil {
 		_ = cmd.Wait()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return err
 	}
 
 	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		stderrText := strings.TrimSpace(stderr.String())
 		if stderrText != "" {
 			return fmt.Errorf("%w: %s", err, stderrText)

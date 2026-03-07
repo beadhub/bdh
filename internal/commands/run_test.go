@@ -306,6 +306,84 @@ func TestRunLoopStopCancelsActiveRunAndPausesUntilResume(t *testing.T) {
 	}
 }
 
+func TestRunLoopStopTreatsCanceledProcessExitAsNonFatal(t *testing.T) {
+	controller := newFakeRunInputController()
+	runStarted := make(chan struct{})
+	secondRunStarted := make(chan struct{})
+	var mu sync.Mutex
+	runCount := 0
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      io.Discard,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		control:  controller,
+		runner: func(ctx context.Context, _ string, _ []string, onLine func(string)) error {
+			mu.Lock()
+			runCount++
+			currentRun := runCount
+			mu.Unlock()
+
+			if currentRun == 1 {
+				close(runStarted)
+				<-ctx.Done()
+				return errors.New("signal: killed")
+			}
+
+			close(secondRunStarted)
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- loop.Run(context.Background(), runLoopOptions{
+			Prompt:      "keep going",
+			WaitSeconds: 0,
+			MaxRuns:     2,
+		})
+	}()
+
+	select {
+	case <-runStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for run to start")
+	}
+
+	controller.send(runControlEvent{Type: runControlStop})
+
+	select {
+	case <-secondRunStarted:
+		t.Fatal("second run should not start before /resume after /stop")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("loop should stay alive after canceled process exit, got %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	controller.send(runControlEvent{Type: runControlResume})
+
+	select {
+	case <-secondRunStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for second run after /resume")
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("expected graceful completion, got: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for loop to finish")
+	}
+}
+
 func TestRunLoopQuitCancelsActiveRunAndExits(t *testing.T) {
 	controller := newFakeRunInputController()
 	runStarted := make(chan struct{})
