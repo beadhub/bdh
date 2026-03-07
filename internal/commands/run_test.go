@@ -1156,6 +1156,54 @@ func TestRunLoopAutoCompactsBeforeWaitWhenUsageExceedsThreshold(t *testing.T) {
 	}
 }
 
+func TestRunLoopAutoCompactReplacesWaitBeforeNextCycle(t *testing.T) {
+	var commands [][]string
+	sleepCalls := 0
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      io.Discard,
+		sleep: func(context.Context, time.Duration) error {
+			sleepCalls++
+			return nil
+		},
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+			commands = append(commands, append([]string(nil), argv...))
+			switch len(commands) {
+			case 1:
+				onLine(`{"type":"assistant","message":{"model":"claude-opus-4-6","usage":{"input_tokens":170000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":800},"content":[]}}`)
+			case 2:
+				onLine(`{"type":"assistant","message":{"model":"claude-opus-4-6","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":10},"content":[]}}`)
+			}
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"s1"}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		Prompt:              "keep going",
+		WaitSeconds:         2,
+		MaxRuns:             2,
+		CompactThresholdPct: 80,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(commands) != 3 {
+		t.Fatalf("expected work, compact, work; got %d commands", len(commands))
+	}
+	if !containsText(joinArgs(commands[1]), "/compact") {
+		t.Fatalf("expected compact command second, got %q", joinArgs(commands[1]))
+	}
+	if containsText(joinArgs(commands[2]), "/compact") {
+		t.Fatalf("expected third command to be next work cycle, got %q", joinArgs(commands[2]))
+	}
+	if sleepCalls != 0 {
+		t.Fatalf("expected auto-compact to replace wait before next cycle, got %d sleep calls", sleepCalls)
+	}
+}
+
 func TestApplyControlEvent_BufferUpdatedRendersInputPrompt(t *testing.T) {
 	var output strings.Builder
 	loop := &runLoop{out: &output}

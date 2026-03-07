@@ -282,11 +282,19 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 			}
 			return err
 		}
-		if err := l.maybeAutoCompact(ctx, opts, state); err != nil {
+		compacted, err := l.maybeAutoCompact(ctx, opts, state)
+		if err != nil {
 			if state.StopRequested && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 				return nil
 			}
 			return err
+		}
+		if compacted {
+			if opts.MaxRuns > 0 && state.Run >= opts.MaxRuns {
+				l.printf("\ndone: reached max-runs (%d)\n", opts.MaxRuns)
+				return nil
+			}
+			continue
 		}
 
 		if opts.MaxRuns > 0 && state.Run >= opts.MaxRuns {
@@ -411,16 +419,19 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	}
 }
 
-func (l *runLoop) maybeAutoCompact(ctx context.Context, opts runLoopOptions, state *runState) error {
+func (l *runLoop) maybeAutoCompact(ctx context.Context, opts runLoopOptions, state *runState) (bool, error) {
 	if opts.CompactThresholdPct <= 0 || state == nil || !state.HasRunUsage {
-		return nil
+		return false, nil
 	}
 	pct := state.LastRunUsage.ContextPct()
 	if pct <= float64(opts.CompactThresholdPct) {
-		return nil
+		return false, nil
 	}
 	l.printf("\ninfo: context %.1f%% exceeds %d%%; running /compact\n", pct, opts.CompactThresholdPct)
-	return l.executeRun(ctx, opts, state, "/compact", "/compact", "compact")
+	if err := l.executeRun(ctx, opts, state, "/compact", "/compact", "compact"); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (l *runLoop) drainPendingControlEvents(state *runState) {
