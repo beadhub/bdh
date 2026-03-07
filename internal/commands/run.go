@@ -36,15 +36,16 @@ type runLoop struct {
 }
 
 type runLoopOptions struct {
-	InitialPrompt string
-	Prompt        string
-	WaitSeconds   int
-	MaxRuns       int
-	SessionMode   bool
-	WorkingDir    string
-	AllowedTools  string
-	Model         string
-	Services      []runServiceConfig
+	InitialPrompt       string
+	Prompt              string
+	WaitSeconds         int
+	MaxRuns             int
+	SessionMode         bool
+	WorkingDir          string
+	AllowedTools        string
+	Model               string
+	CompactThresholdPct int
+	Services            []runServiceConfig
 }
 
 type runCycleDecision struct {
@@ -69,6 +70,8 @@ type runState struct {
 	SuppressText   bool
 	StructuredOut  bool
 	LastRunError   string
+	LastRunUsage   runUsageStats
+	HasRunUsage    bool
 }
 
 var (
@@ -82,6 +85,7 @@ var (
 	runWorkingDir   string
 	runAllowedTools string
 	runModel        string
+	runCompactPct   int
 	runProviderName string
 	runIgnoreBeads  bool
 	runInitConfig   bool
@@ -121,6 +125,7 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 			cmd.Flags().Changed("comms-prompt-suffix"), runCommsPrompt,
 			cmd.Flags().Changed("wait"), runWaitSeconds,
 			cmd.Flags().Changed("idle-wait"), runIdleWait,
+			cmd.Flags().Changed("compact-threshold-pct"), runCompactPct,
 		)
 		if err != nil {
 			return err
@@ -181,6 +186,7 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 			WorkingDir:    runWorkingDir,
 			AllowedTools:  runAllowedTools,
 			Model:         runModel,
+			CompactThresholdPct: settings.CompactThreshold,
 			Services:      settings.Services,
 		}
 
@@ -198,6 +204,7 @@ func init() {
 	runCmd.Flags().StringVar(&runCommsPrompt, "comms-prompt-suffix", "", "Override the configured comms cycle prompt suffix for this run")
 	runCmd.Flags().IntVar(&runWaitSeconds, "wait", defaultRunWaitSeconds, "Idle seconds between runs")
 	runCmd.Flags().IntVar(&runIdleWait, "idle-wait", defaultRunIdleWaitSeconds, "Idle seconds between runs when nothing needs attention")
+	runCmd.Flags().IntVar(&runCompactPct, "compact-threshold-pct", defaultRunCompactThreshold, "Run /compact after a successful cycle when context usage exceeds this percent (0 disables)")
 	runCmd.Flags().BoolVar(&runSessionMode, "session", false, "Resume the same provider session across runs")
 	runCmd.Flags().IntVar(&runMaxRuns, "max-runs", 0, "Stop after N runs (0 means infinite)")
 	runCmd.Flags().StringVar(&runWorkingDir, "dir", "", "Working directory for the agent process")
@@ -275,6 +282,12 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 			}
 			return err
 		}
+		if err := l.maybeAutoCompact(ctx, opts, state); err != nil {
+			if state.StopRequested && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				return nil
+			}
+			return err
+		}
 
 		if opts.MaxRuns > 0 && state.Run >= opts.MaxRuns {
 			l.printf("\ndone: reached max-runs (%d)\n", opts.MaxRuns)
@@ -328,7 +341,14 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 }
 
 func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runState, prompt string, displayPrompt string) error {
+	header := fmt.Sprintf("run #%d", state.Run)
+	return l.executeRun(ctx, opts, state, prompt, displayPrompt, header)
+}
+
+func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *runState, prompt string, displayPrompt string, header string) error {
 	state.LastRunError = ""
+	state.LastRunUsage = runUsageStats{}
+	state.HasRunUsage = false
 	buildOpts := runBuildOptions{
 		AllowedTools: opts.AllowedTools,
 		Model:        opts.Model,
@@ -346,7 +366,7 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 		return err
 	}
 
-	l.printf("\nrun #%d  %s  >  %s\n\n", state.Run, l.now().Format("15:04:05"), truncateRunText(displayPrompt, 80))
+	l.printf("\n%s  %s  >  %s\n\n", header, l.now().Format("15:04:05"), truncateRunText(displayPrompt, 80))
 	l.println("type /wait, /stop, /quit, or start typing to queue a prompt.")
 	l.clearStatusLine()
 	l.renderInputPrompt(state)
@@ -391,6 +411,18 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 	}
 }
 
+func (l *runLoop) maybeAutoCompact(ctx context.Context, opts runLoopOptions, state *runState) error {
+	if opts.CompactThresholdPct <= 0 || state == nil || !state.HasRunUsage {
+		return nil
+	}
+	pct := state.LastRunUsage.ContextPct()
+	if pct <= float64(opts.CompactThresholdPct) {
+		return nil
+	}
+	l.printf("\ninfo: context %.1f%% exceeds %d%%; running /compact\n", pct, opts.CompactThresholdPct)
+	return l.executeRun(ctx, opts, state, "/compact", "/compact", "compact")
+}
+
 func (l *runLoop) drainPendingControlEvents(state *runState) {
 	for {
 		select {
@@ -415,6 +447,10 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 
 	if sid := l.provider.SessionID(event); sid != "" {
 		state.SessionID = sid
+	}
+	if event != nil && event.Usage != nil {
+		state.LastRunUsage = *event.Usage
+		state.HasRunUsage = true
 	}
 
 	switch event.Type {

@@ -13,6 +13,7 @@ import (
 const (
 	defaultRunWaitSeconds       = 20
 	defaultRunIdleWaitSeconds   = 30
+	defaultRunCompactThreshold  = 80
 	defaultRunBasePrompt        = ""
 	defaultRunWorkPromptSuffix  = "Before closing the bead, run a self-review or code-reviewer pass on your changes."
 	defaultRunCommsPromptSuffix = ""
@@ -24,6 +25,7 @@ type runUserConfig struct {
 	CommsPromptSuffix *string            `json:"comms_prompt_suffix"`
 	WaitSeconds       *int               `json:"wait_seconds"`
 	IdleWaitSeconds   *int               `json:"idle_wait_seconds"`
+	CompactThreshold  *int               `json:"compact_threshold_pct"`
 	Services          []runServiceConfig `json:"services"`
 }
 
@@ -33,6 +35,7 @@ type runResolvedSettings struct {
 	CommsPromptSuffix string
 	WaitSeconds       int
 	IdleWaitSeconds   int
+	CompactThreshold  int
 	Services          []runServiceConfig
 }
 
@@ -109,6 +112,9 @@ func mergeRunUserConfig(base runUserConfig, override runUserConfig) runUserConfi
 	if override.IdleWaitSeconds != nil {
 		merged.IdleWaitSeconds = override.IdleWaitSeconds
 	}
+	if override.CompactThreshold != nil {
+		merged.CompactThreshold = override.CompactThreshold
+	}
 	if override.Services != nil {
 		merged.Services = append([]runServiceConfig(nil), override.Services...)
 	}
@@ -127,6 +133,8 @@ func resolveRunSettings(
 	waitFlagValue int,
 	idleWaitFlagSet bool,
 	idleWaitFlagValue int,
+	compactThresholdFlagSet bool,
+	compactThresholdFlagValue int,
 ) (runResolvedSettings, error) {
 	settings := runResolvedSettings{
 		BasePrompt:        defaultRunBasePrompt,
@@ -134,6 +142,7 @@ func resolveRunSettings(
 		CommsPromptSuffix: defaultRunCommsPromptSuffix,
 		WaitSeconds:       defaultRunWaitSeconds,
 		IdleWaitSeconds:   defaultRunIdleWaitSeconds,
+		CompactThreshold:  defaultRunCompactThreshold,
 	}
 
 	if cfg.BasePrompt != nil {
@@ -150,6 +159,9 @@ func resolveRunSettings(
 	}
 	if cfg.IdleWaitSeconds != nil {
 		settings.IdleWaitSeconds = *cfg.IdleWaitSeconds
+	}
+	if cfg.CompactThreshold != nil {
+		settings.CompactThreshold = *cfg.CompactThreshold
 	}
 	if cfg.Services != nil {
 		settings.Services = append([]runServiceConfig(nil), cfg.Services...)
@@ -169,12 +181,18 @@ func resolveRunSettings(
 	if idleWaitFlagSet {
 		settings.IdleWaitSeconds = idleWaitFlagValue
 	}
+	if compactThresholdFlagSet {
+		settings.CompactThreshold = compactThresholdFlagValue
+	}
 
 	if settings.WaitSeconds < 0 {
 		return runResolvedSettings{}, fmt.Errorf("wait_seconds must be >= 0")
 	}
 	if settings.IdleWaitSeconds < 0 {
 		return runResolvedSettings{}, fmt.Errorf("idle_wait_seconds must be >= 0")
+	}
+	if settings.CompactThreshold < 0 || settings.CompactThreshold > 100 {
+		return runResolvedSettings{}, fmt.Errorf("compact_threshold_pct must be between 0 and 100")
 	}
 	for _, service := range settings.Services {
 		if strings.TrimSpace(service.Name) == "" {

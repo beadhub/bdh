@@ -18,7 +18,7 @@ const (
 
 func initRunUserConfig(in io.Reader, out io.Writer, existing runUserConfig) error {
 	reader := bufio.NewReader(in)
-	current, err := resolveRunSettings(existing, false, "", false, "", false, "", false, 0, false, 0)
+	current, err := resolveRunSettings(existing, false, "", false, "", false, "", false, 0, false, 0, false, 0)
 	if err != nil {
 		return err
 	}
@@ -46,6 +46,10 @@ func initRunUserConfig(in io.Reader, out io.Writer, existing runUserConfig) erro
 	if err != nil {
 		return err
 	}
+	compactThreshold, err := promptRunConfigInt(reader, out, "compact_threshold_pct", current.CompactThreshold)
+	if err != nil {
+		return err
+	}
 
 	cfg := runUserConfig{
 		BasePrompt:        basePrompt,
@@ -53,6 +57,7 @@ func initRunUserConfig(in io.Reader, out io.Writer, existing runUserConfig) erro
 		CommsPromptSuffix: commsSuffix,
 		WaitSeconds:       waitSeconds,
 		IdleWaitSeconds:   idleWaitSeconds,
+		CompactThreshold:  compactThreshold,
 	}
 	path, err := writeRunUserConfig(cfg)
 	if err != nil {

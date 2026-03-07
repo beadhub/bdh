@@ -11,6 +11,25 @@ type runProviderCapabilities struct {
 	SupportsContinue bool
 }
 
+type runUsageStats struct {
+	InputTokens              int
+	CacheCreationInputTokens int
+	CacheReadInputTokens     int
+	OutputTokens             int
+	ContextWindowSize        int
+}
+
+func (s runUsageStats) TotalInput() int {
+	return s.InputTokens + s.CacheCreationInputTokens + s.CacheReadInputTokens
+}
+
+func (s runUsageStats) ContextPct() float64 {
+	if s.ContextWindowSize <= 0 {
+		return 0
+	}
+	return float64(s.TotalInput()) / float64(s.ContextWindowSize) * 100
+}
+
 type runBuildOptions struct {
 	SessionID       string
 	ContinueSession bool
@@ -49,6 +68,7 @@ type runEvent struct {
 	CostUSD    *float64
 	Session    string
 	IsError    bool
+	Usage      *runUsageStats
 }
 
 type claudeProvider struct{}
@@ -142,6 +162,13 @@ func (claudeProvider) ParseOutput(line string) (*runEvent, error) {
 				Name  string         `json:"name"`
 				Input map[string]any `json:"input"`
 			} `json:"content"`
+			Usage struct {
+				InputTokens              int `json:"input_tokens"`
+				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+				OutputTokens             int `json:"output_tokens"`
+			} `json:"usage"`
+			Model string `json:"model"`
 		}
 		if err := json.Unmarshal(envelope.Message, &message); err != nil {
 			return nil, err
@@ -153,8 +180,24 @@ func (claudeProvider) ParseOutput(line string) (*runEvent, error) {
 			}
 			calls = append(calls, runToolCall{Name: block.Name, Input: block.Input})
 		}
+		var usage *runUsageStats
+		if message.Usage.InputTokens > 0 || message.Usage.CacheCreationInputTokens > 0 || message.Usage.CacheReadInputTokens > 0 || message.Usage.OutputTokens > 0 {
+			usage = &runUsageStats{
+				InputTokens:              message.Usage.InputTokens,
+				CacheCreationInputTokens: message.Usage.CacheCreationInputTokens,
+				CacheReadInputTokens:     message.Usage.CacheReadInputTokens,
+				OutputTokens:             message.Usage.OutputTokens,
+				ContextWindowSize:        claudeContextWindowSize(message.Model),
+			}
+			if usage.ContextWindowSize == 0 {
+				usage.ContextWindowSize = claudeContextWindowSize(envelope.Model)
+			}
+		}
 		if len(calls) > 0 {
-			return &runEvent{Type: runEventToolCall, ToolCalls: calls}, nil
+			return &runEvent{Type: runEventToolCall, ToolCalls: calls, Usage: usage}, nil
+		}
+		if usage != nil {
+			return &runEvent{Usage: usage}, nil
 		}
 	case "tool_result":
 		return &runEvent{Type: runEventToolResult, Text: claudeToolResultText(envelope.Content)}, nil
@@ -184,6 +227,14 @@ func (claudeProvider) ParseOutput(line string) (*runEvent, error) {
 	}
 
 	return &runEvent{}, nil
+}
+
+func claudeContextWindowSize(model string) int {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" {
+		return 200000
+	}
+	return 200000
 }
 
 func (claudeProvider) SessionID(event *runEvent) string {

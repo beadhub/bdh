@@ -19,7 +19,7 @@ func TestLoadRunUserConfigMissingReturnsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadRunUserConfig returned error: %v", err)
 	}
-	if cfg.BasePrompt != nil || cfg.WorkPromptSuffix != nil || cfg.CommsPromptSuffix != nil || cfg.WaitSeconds != nil || cfg.IdleWaitSeconds != nil {
+	if cfg.BasePrompt != nil || cfg.WorkPromptSuffix != nil || cfg.CommsPromptSuffix != nil || cfg.WaitSeconds != nil || cfg.IdleWaitSeconds != nil || cfg.CompactThreshold != nil {
 		t.Fatalf("expected zero config, got %#v", cfg)
 	}
 }
@@ -34,7 +34,7 @@ func TestLoadRunUserConfigReadsFile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir failed: %v", err)
 	}
-	if err := os.WriteFile(path, []byte(`{"base_prompt":"coordinate with grace","work_prompt_suffix":"review before close","comms_prompt_suffix":"return to your current work after handling comms","wait_seconds":11,"idle_wait_seconds":44}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"base_prompt":"coordinate with grace","work_prompt_suffix":"review before close","comms_prompt_suffix":"return to your current work after handling comms","wait_seconds":11,"idle_wait_seconds":44,"compact_threshold_pct":72}`), 0o600); err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
 
@@ -56,6 +56,9 @@ func TestLoadRunUserConfigReadsFile(t *testing.T) {
 	}
 	if cfg.CommsPromptSuffix == nil || *cfg.CommsPromptSuffix != "return to your current work after handling comms" {
 		t.Fatalf("expected comms_prompt_suffix, got %#v", cfg.CommsPromptSuffix)
+	}
+	if cfg.CompactThreshold == nil || *cfg.CompactThreshold != 72 {
+		t.Fatalf("expected compact_threshold_pct=72, got %#v", cfg.CompactThreshold)
 	}
 	if len(cfg.Services) != 0 {
 		t.Fatalf("expected no services, got %#v", cfg.Services)
@@ -82,12 +85,12 @@ func TestLoadRunUserConfigLocalOverridesGlobal(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(globalPath), 0o755); err != nil {
 		t.Fatalf("mkdir global config failed: %v", err)
 	}
-	if err := os.WriteFile(globalPath, []byte(`{"base_prompt":"global base","work_prompt_suffix":"global work","wait_seconds":11,"idle_wait_seconds":44,"services":[{"name":"backend","command":"make run-backend","description":"Backend API"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(globalPath, []byte(`{"base_prompt":"global base","work_prompt_suffix":"global work","wait_seconds":11,"idle_wait_seconds":44,"compact_threshold_pct":81,"services":[{"name":"backend","command":"make run-backend","description":"Backend API"}]}`), 0o600); err != nil {
 		t.Fatalf("write global config failed: %v", err)
 	}
 
 	localPath := filepath.Join(workspaceRoot, ".beadhub-run.json")
-	if err := os.WriteFile(localPath, []byte(`{"base_prompt":"local base","comms_prompt_suffix":"local comms","idle_wait_seconds":9,"services":[{"name":"frontend","command":"make run-frontend","description":"Frontend UI"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(localPath, []byte(`{"base_prompt":"local base","comms_prompt_suffix":"local comms","idle_wait_seconds":9,"compact_threshold_pct":65,"services":[{"name":"frontend","command":"make run-frontend","description":"Frontend UI"}]}`), 0o600); err != nil {
 		t.Fatalf("write local config failed: %v", err)
 	}
 
@@ -110,6 +113,9 @@ func TestLoadRunUserConfigLocalOverridesGlobal(t *testing.T) {
 	if cfg.IdleWaitSeconds == nil || *cfg.IdleWaitSeconds != 9 {
 		t.Fatalf("expected local idle_wait_seconds to win, got %#v", cfg.IdleWaitSeconds)
 	}
+	if cfg.CompactThreshold == nil || *cfg.CompactThreshold != 65 {
+		t.Fatalf("expected local compact threshold to win, got %#v", cfg.CompactThreshold)
+	}
 	if len(cfg.Services) != 1 || cfg.Services[0].Name != "frontend" {
 		t.Fatalf("expected local services to override global, got %#v", cfg.Services)
 	}
@@ -118,6 +124,7 @@ func TestLoadRunUserConfigLocalOverridesGlobal(t *testing.T) {
 func TestResolveRunSettingsPrecedence(t *testing.T) {
 	wait := 9
 	idleWait := 41
+	compactThreshold := 77
 	basePrompt := "config base"
 	workSuffix := "config work suffix"
 	commsSuffix := "config comms suffix"
@@ -127,9 +134,10 @@ func TestResolveRunSettingsPrecedence(t *testing.T) {
 		CommsPromptSuffix: &commsSuffix,
 		WaitSeconds:       &wait,
 		IdleWaitSeconds:   &idleWait,
+		CompactThreshold:  &compactThreshold,
 	}
 
-	settings, err := resolveRunSettings(cfg, false, "", false, "", false, "", true, 7, true, 13)
+	settings, err := resolveRunSettings(cfg, false, "", false, "", false, "", true, 7, true, 13, false, 0)
 	if err != nil {
 		t.Fatalf("resolveRunSettings returned error: %v", err)
 	}
@@ -147,6 +155,9 @@ func TestResolveRunSettingsPrecedence(t *testing.T) {
 	}
 	if settings.CommsPromptSuffix != "config comms suffix" {
 		t.Fatalf("expected comms suffix from config, got %q", settings.CommsPromptSuffix)
+	}
+	if settings.CompactThreshold != 77 {
+		t.Fatalf("expected compact threshold from config, got %d", settings.CompactThreshold)
 	}
 }
 
@@ -167,6 +178,7 @@ func TestResolveRunSettingsPromptFlagsOverrideConfig(t *testing.T) {
 		true, "flag comms",
 		false, 0,
 		false, 0,
+		true, 55,
 	)
 	if err != nil {
 		t.Fatalf("resolveRunSettings returned error: %v", err)
@@ -179,5 +191,8 @@ func TestResolveRunSettingsPromptFlagsOverrideConfig(t *testing.T) {
 	}
 	if settings.CommsPromptSuffix != "flag comms" {
 		t.Fatalf("expected comms suffix from flag, got %q", settings.CommsPromptSuffix)
+	}
+	if settings.CompactThreshold != 55 {
+		t.Fatalf("expected compact threshold from flag, got %d", settings.CompactThreshold)
 	}
 }

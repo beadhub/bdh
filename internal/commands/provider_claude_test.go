@@ -50,6 +50,23 @@ func TestClaudeProviderParseOutput(t *testing.T) {
 	if toolEvent.Type != runEventToolCall || len(toolEvent.ToolCalls) != 1 || toolEvent.ToolCalls[0].Name != "exec_command" {
 		t.Fatalf("unexpected tool event: %#v", toolEvent)
 	}
+	if toolEvent.Usage != nil {
+		t.Fatalf("expected no usage stats on bare tool event, got %#v", toolEvent.Usage)
+	}
+
+	usageEvent, err := provider.ParseOutput(`{"type":"assistant","message":{"model":"claude-opus-4-6","usage":{"input_tokens":12000,"cache_creation_input_tokens":5000,"cache_read_input_tokens":18000,"output_tokens":800},"content":[]}}`)
+	if err != nil {
+		t.Fatalf("ParseOutput usage assistant returned error: %v", err)
+	}
+	if usageEvent.Usage == nil {
+		t.Fatal("expected usage stats on assistant event")
+	}
+	if usageEvent.Usage.TotalInput() != 35000 {
+		t.Fatalf("expected total input 35000, got %d", usageEvent.Usage.TotalInput())
+	}
+	if usageEvent.Usage.ContextWindowSize != 200000 {
+		t.Fatalf("expected 200000 context window, got %d", usageEvent.Usage.ContextWindowSize)
+	}
 
 	resultEvent, err := provider.ParseOutput(`{"type":"result","duration_ms":2500,"cost_usd":0.0042,"session_id":"s1"}`)
 	if err != nil {
@@ -97,5 +114,21 @@ func TestClaudeProviderParseNestedSystemMessage(t *testing.T) {
 	}
 	if !containsText(systemEvent.Text, "session") || !containsText(systemEvent.Text, "cwd=") {
 		t.Fatalf("expected summarized nested system message, got %q", systemEvent.Text)
+	}
+}
+
+func TestRunUsageStatsContextPct(t *testing.T) {
+	stats := runUsageStats{
+		InputTokens:              12000,
+		CacheCreationInputTokens: 5000,
+		CacheReadInputTokens:     18000,
+		ContextWindowSize:        200000,
+	}
+
+	if got := stats.TotalInput(); got != 35000 {
+		t.Fatalf("expected total input 35000, got %d", got)
+	}
+	if got := stats.ContextPct(); got != 17.5 {
+		t.Fatalf("expected context pct 17.5, got %v", got)
 	}
 }

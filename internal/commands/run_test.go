@@ -1111,6 +1111,51 @@ func TestRunLoopPrefersProviderStructuredErrorOverRawExitStatus(t *testing.T) {
 	}
 }
 
+func TestRunLoopAutoCompactsBeforeWaitWhenUsageExceedsThreshold(t *testing.T) {
+	var commands [][]string
+	sleepCalls := 0
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      io.Discard,
+		sleep: func(context.Context, time.Duration) error {
+			sleepCalls++
+			return nil
+		},
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+			commands = append(commands, append([]string(nil), argv...))
+			if len(commands) == 1 {
+				onLine(`{"type":"assistant","message":{"model":"claude-opus-4-6","usage":{"input_tokens":170000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":800},"content":[]}}`)
+			}
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"s1"}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		Prompt:              "keep going",
+		WaitSeconds:         2,
+		MaxRuns:             1,
+		CompactThresholdPct: 80,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(commands) != 2 {
+		t.Fatalf("expected work run plus compact run, got %d commands", len(commands))
+	}
+	if containsText(joinArgs(commands[0]), "/compact") {
+		t.Fatalf("expected first run to be normal work, got %q", joinArgs(commands[0]))
+	}
+	if !containsText(joinArgs(commands[1]), "/compact") {
+		t.Fatalf("expected second run to be compact, got %q", joinArgs(commands[1]))
+	}
+	if sleepCalls != 0 {
+		t.Fatalf("expected compact to happen before any wait, got %d sleep calls", sleepCalls)
+	}
+}
+
 func TestApplyControlEvent_BufferUpdatedRendersInputPrompt(t *testing.T) {
 	var output strings.Builder
 	loop := &runLoop{out: &output}
