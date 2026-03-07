@@ -640,10 +640,16 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 	switch event.Type {
 	case runControlTypingStarted:
 		state.PendingInput = true
+		if !activeRun {
+			state.Paused = true
+		}
 		l.renderInputPrompt(state)
 	case runControlBufferUpdated:
 		state.InputBuffer = event.Text
 		state.PendingInput = event.Text != ""
+		if !activeRun && state.PendingInput {
+			state.Paused = true
+		}
 		l.renderInputPrompt(state)
 	case runControlPrompt:
 		state.PendingInput = false

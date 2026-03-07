@@ -1009,6 +1009,62 @@ func TestRunLoopTypingDuringActiveRunDoesNotPauseLoop(t *testing.T) {
 	}
 }
 
+func TestIdleWithControlsTypingPausesCountdownUntilResume(t *testing.T) {
+	controller := newFakeRunInputController()
+	sleepStarted := make(chan struct{}, 1)
+	releaseSleep := make(chan struct{})
+	done := make(chan error, 1)
+
+	loop := &runLoop{
+		out:     io.Discard,
+		control: controller,
+		sleep: func(_ context.Context, _ time.Duration) error {
+			select {
+			case sleepStarted <- struct{}{}:
+			default:
+			}
+			<-releaseSleep
+			return nil
+		},
+	}
+
+	state := &runState{}
+	go func() {
+		done <- loop.idleWithControlsLabel(context.Background(), 2, state, "next run")
+	}()
+
+	select {
+	case <-sleepStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for countdown sleep to start")
+	}
+
+	controller.send(runControlEvent{Type: runControlTypingStarted})
+	controller.send(runControlEvent{Type: runControlBufferUpdated, Text: "draft"})
+	close(releaseSleep)
+
+	select {
+	case err := <-done:
+		t.Fatalf("countdown should pause instead of completing, got %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	if !state.Paused {
+		t.Fatal("expected typing during countdown to pause the loop")
+	}
+
+	controller.send(runControlEvent{Type: runControlResume})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected countdown to resume cleanly, got %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for countdown to finish after /resume")
+	}
+}
+
 func TestRunLoopPropagatesRunnerError(t *testing.T) {
 	expected := errors.New("runner failed")
 
