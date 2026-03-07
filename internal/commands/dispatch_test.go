@@ -74,8 +74,8 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 	if idleDecision.WaitSeconds != 30 {
 		t.Fatalf("expected long idle wait, got %d", idleDecision.WaitSeconds)
 	}
-	if !containsText(idleDecision.Prompt, "Check for pending chat messages or unread mail") {
-		t.Fatalf("expected idle prompt, got: %q", idleDecision.Prompt)
+	if !idleDecision.Skip {
+		t.Fatalf("expected idle dispatch to skip provider launch")
 	}
 }
 
@@ -156,38 +156,41 @@ func TestRunLoopFallsBackToExplicitPromptOnDispatchError(t *testing.T) {
 	}
 }
 
-func TestRunLoopFallsBackToIdlePromptOnDispatchErrorWithoutExplicitPrompt(t *testing.T) {
+func TestRunLoopWaitsForDispatchRecoveryWithoutExplicitPrompt(t *testing.T) {
 	dispatcher := &fakeRunDispatcher{err: errors.New("server down")}
-	var commands [][]string
 	var output strings.Builder
+	var slept []time.Duration
 
 	loop := &runLoop{
 		provider: claudeProvider{},
 		now:      time.Now,
 		out:      &output,
-		sleep:    func(context.Context, time.Duration) error { return nil },
+		defaults: runDispatchDefaults{IdleWaitSeconds: 1},
+		sleep: func(_ context.Context, d time.Duration) error {
+			slept = append(slept, d)
+			return nil
+		},
 		dispatch: dispatcher,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
-			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+		runner: func(_ context.Context, _ string, _ []string, _ func(string)) error {
+			t.Fatal("runner should not be called")
 			return nil
 		},
 	}
 
-	err := loop.Run(context.Background(), runLoopOptions{
-		WaitSeconds: 0,
-		MaxRuns:     1,
-	})
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	loop.sleep = func(_ context.Context, d time.Duration) error {
+		slept = append(slept, d)
+		cancel()
+		return nil
 	}
-	if len(commands) != 1 {
-		t.Fatalf("expected 1 run, got %d", len(commands))
+	err := loop.Run(ctx, runLoopOptions{WaitSeconds: 0})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
 	}
-	if !containsText(joinArgs(commands[0]), "Check for pending chat messages or unread mail") {
-		t.Fatalf("expected idle fallback prompt, got %q", joinArgs(commands[0]))
+	if len(slept) == 0 {
+		t.Fatal("expected idle sleep while waiting for dispatch recovery")
 	}
-	if !containsText(output.String(), "falling back to idle prompt") {
-		t.Fatalf("expected idle fallback log, got %q", output.String())
+	if !containsText(output.String(), "waiting for dispatch recovery") {
+		t.Fatalf("expected dispatch recovery log, got %q", output.String())
 	}
 }

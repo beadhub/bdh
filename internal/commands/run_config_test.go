@@ -14,7 +14,7 @@ func TestLoadRunUserConfigMissingReturnsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadRunUserConfig returned error: %v", err)
 	}
-	if cfg.IdlePrompt != "" || cfg.WaitSeconds != nil || cfg.IdleWaitSeconds != nil {
+	if cfg.WaitSeconds != nil || cfg.IdleWaitSeconds != nil {
 		t.Fatalf("expected zero config, got %#v", cfg)
 	}
 }
@@ -26,16 +26,13 @@ func TestLoadRunUserConfigReadsFile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir failed: %v", err)
 	}
-	if err := os.WriteFile(path, []byte(`{"idle_prompt":"idle here","wait_seconds":11,"idle_wait_seconds":44}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"wait_seconds":11,"idle_wait_seconds":44}`), 0o600); err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
 
 	cfg, err := loadRunUserConfig()
 	if err != nil {
 		t.Fatalf("loadRunUserConfig returned error: %v", err)
-	}
-	if cfg.IdlePrompt != "idle here" {
-		t.Fatalf("expected idle prompt, got %q", cfg.IdlePrompt)
 	}
 	if cfg.WaitSeconds == nil || *cfg.WaitSeconds != 11 {
 		t.Fatalf("expected wait_seconds=11, got %#v", cfg.WaitSeconds)
@@ -49,12 +46,11 @@ func TestResolveRunSettingsPrecedence(t *testing.T) {
 	wait := 9
 	idleWait := 41
 	cfg := runUserConfig{
-		IdlePrompt:      "config idle",
 		WaitSeconds:     &wait,
 		IdleWaitSeconds: &idleWait,
 	}
 
-	settings, err := resolveRunSettings(cfg, true, 7, true, "flag idle", true, 13)
+	settings, err := resolveRunSettings(cfg, true, 7, false, "", true, 13)
 	if err != nil {
 		t.Fatalf("resolveRunSettings returned error: %v", err)
 	}
@@ -63,8 +59,5 @@ func TestResolveRunSettingsPrecedence(t *testing.T) {
 	}
 	if settings.IdleWaitSeconds != 13 {
 		t.Fatalf("expected flag idle wait to win, got %d", settings.IdleWaitSeconds)
-	}
-	if settings.IdlePrompt != "flag idle" {
-		t.Fatalf("expected flag idle prompt to win, got %q", settings.IdlePrompt)
 	}
 }

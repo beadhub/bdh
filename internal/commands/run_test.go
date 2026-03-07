@@ -619,13 +619,24 @@ func TestRenderIdleLineUsesStatusAreaOnScreen(t *testing.T) {
 		InputBuffer:  "/resume soon",
 	}
 
-	loop.renderIdleLine(12, state)
+	loop.renderIdleLine("next run", 12, state)
 
 	if screen.statusLine != "next run in 12s" {
 		t.Fatalf("expected status line to hold countdown, got %q", screen.statusLine)
 	}
 	if screen.inputLine != "input> /resume soon" {
 		t.Fatalf("expected input line to remain separate, got %q", screen.inputLine)
+	}
+}
+
+func TestRenderIdleLineWaitingForWorkUsesStatusAreaOnScreen(t *testing.T) {
+	screen := &runScreenManager{}
+	loop := &runLoop{screen: screen}
+
+	loop.renderIdleLine("waiting for work", 30, &runState{})
+
+	if screen.statusLine != "waiting for work in 30s" {
+		t.Fatalf("expected waiting status line, got %q", screen.statusLine)
 	}
 }
 

@@ -21,6 +21,7 @@ type runDispatcher interface {
 type runDispatchDecision struct {
 	Prompt      string
 	WaitSeconds int
+	Skip        bool
 }
 
 type runDispatchSummary struct {
@@ -37,7 +38,6 @@ type runReadyTask struct {
 }
 
 type runDispatchDefaults struct {
-	IdlePrompt      string
 	IdleWaitSeconds int
 }
 
@@ -120,9 +120,6 @@ func (d *beadhubRunDispatcher) fetchReadyTasks(ctx context.Context) ([]runReadyT
 }
 
 func withRunDispatchDefaults(defaults runDispatchDefaults) runDispatchDefaults {
-	if strings.TrimSpace(defaults.IdlePrompt) == "" {
-		defaults.IdlePrompt = defaultRunIdlePrompt
-	}
 	if defaults.IdleWaitSeconds == 0 {
 		defaults.IdleWaitSeconds = defaultRunIdleWaitSeconds
 	}
@@ -159,8 +156,8 @@ func selectRunDispatch(summary runDispatchSummary, defaults runDispatchDefaults)
 		}
 	default:
 		return runDispatchDecision{
-			Prompt:      defaults.IdlePrompt,
 			WaitSeconds: defaults.IdleWaitSeconds,
+			Skip:        true,
 		}
 	}
 }

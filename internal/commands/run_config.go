@@ -10,18 +10,15 @@ import (
 const (
 	defaultRunWaitSeconds     = 20
 	defaultRunIdleWaitSeconds = 30
-	defaultRunIdlePrompt      = "Check for pending chat messages or unread mail. If nothing needs attention, wait for new work."
 )
 
 type runUserConfig struct {
-	IdlePrompt      string `json:"idle_prompt"`
-	WaitSeconds     *int   `json:"wait_seconds"`
-	IdleWaitSeconds *int   `json:"idle_wait_seconds"`
+	WaitSeconds     *int `json:"wait_seconds"`
+	IdleWaitSeconds *int `json:"idle_wait_seconds"`
 }
 
 type runResolvedSettings struct {
 	WaitSeconds     int
-	IdlePrompt      string
 	IdleWaitSeconds int
 }
 
@@ -64,7 +61,6 @@ func resolveRunSettings(
 ) (runResolvedSettings, error) {
 	settings := runResolvedSettings{
 		WaitSeconds:     defaultRunWaitSeconds,
-		IdlePrompt:      defaultRunIdlePrompt,
 		IdleWaitSeconds: defaultRunIdleWaitSeconds,
 	}
 
@@ -74,18 +70,11 @@ func resolveRunSettings(
 	if cfg.IdleWaitSeconds != nil {
 		settings.IdleWaitSeconds = *cfg.IdleWaitSeconds
 	}
-	if cfg.IdlePrompt != "" {
-		settings.IdlePrompt = cfg.IdlePrompt
-	}
-
 	if waitFlagSet {
 		settings.WaitSeconds = waitFlagValue
 	}
 	if idleWaitFlagSet {
 		settings.IdleWaitSeconds = idleWaitFlagValue
-	}
-	if idlePromptFlagSet {
-		settings.IdlePrompt = idlePromptFlagValue
 	}
 
 	if settings.WaitSeconds < 0 {
