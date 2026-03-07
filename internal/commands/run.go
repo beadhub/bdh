@@ -97,14 +97,14 @@ var runCmd = &cobra.Command{
 	Long: `Run an AI coding agent in a loop.
 
 Current implementation includes:
-  - repeated claude -p invocations
+  - repeated provider invocations (currently Claude and Codex)
   - stream-json parsing and formatted output
   - provider session continuity when --continue is requested
   - /stop, /wait, /resume, /quit, and prompt override controls
   - bdh-driven dispatch between runs (chat, mail, claims, ready work)
   - adaptive wait behavior based on dispatch priority
 
-Future provider work will add non-Claude backends on top of the same loop.`,
+Future provider work will add more backends on top of the same loop.`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if runMaxRuns < 0 {

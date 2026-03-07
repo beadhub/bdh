@@ -6,11 +6,6 @@ import (
 	"strings"
 )
 
-type runProviderCapabilities struct {
-	SupportsResume   bool
-	SupportsContinue bool
-}
-
 type runUsageStats struct {
 	InputTokens              int
 	CacheCreationInputTokens int
@@ -41,7 +36,6 @@ type runProvider interface {
 	BuildCommand(prompt string, opts runBuildOptions) ([]string, error)
 	ParseOutput(line string) (*runEvent, error)
 	SessionID(event *runEvent) string
-	Capabilities() runProviderCapabilities
 }
 
 type runEventType string
@@ -102,6 +96,8 @@ func newRunProvider(name string) (runProvider, error) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "", "claude":
 		return claudeProvider{}, nil
+	case "codex":
+		return codexProvider{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", name)
 	}
@@ -238,13 +234,6 @@ func (claudeProvider) SessionID(event *runEvent) string {
 		return ""
 	}
 	return event.Session
-}
-
-func (claudeProvider) Capabilities() runProviderCapabilities {
-	return runProviderCapabilities{
-		SupportsResume:   true,
-		SupportsContinue: true,
-	}
 }
 
 func claudeToolResultText(content any) string {
