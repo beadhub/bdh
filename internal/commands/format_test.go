@@ -14,27 +14,34 @@ func TestFormatRunToolCallLinesUsesCompactCommandAndDescription(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 lines, got %#v", lines)
 	}
-	if lines[0] != `tool: Bash("go test ./... 2>&1")` {
-		t.Fatalf("unexpected summary line %q", lines[0])
+	if lines[0] != `- Bash("go test ./... 2>&1")` {
+		t.Fatalf("unexpected first line %q", lines[0])
 	}
-	if lines[1] != "      Run all the tests" {
+	if lines[1] != "  Run all the tests" {
 		t.Fatalf("unexpected description line %q", lines[1])
 	}
 }
 
-func TestFormatRunToolCallLinesKeepsExtraArgumentsInline(t *testing.T) {
+func TestFormatRunToolCallLinesWrapsExtraArgumentsWithAlignedIndent(t *testing.T) {
 	lines := formatRunToolCallLines(runToolCall{
-		Name: "ToolSearch",
+		Name: "Read",
 		Input: map[string]any{
-			"query":       "select:Bash",
-			"max_results": 1,
+			"file_path": "/tmp/example.txt",
+			"limit":     17,
+			"offset":    48,
 		},
 	})
 
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 line, got %#v", lines)
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %#v", lines)
 	}
-	if lines[0] != `tool: ToolSearch("select:Bash", max_results=1)` {
-		t.Fatalf("unexpected summary line %q", lines[0])
+	if lines[0] != `- Read(file_path="/tmp/example.txt",` {
+		t.Fatalf("unexpected first line %q", lines[0])
+	}
+	if lines[1] != `       limit=17,` {
+		t.Fatalf("unexpected continuation line %q", lines[1])
+	}
+	if lines[2] != `       offset=48)` {
+		t.Fatalf("unexpected final line %q", lines[2])
 	}
 }

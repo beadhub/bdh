@@ -486,9 +486,13 @@ func wrapRunScreenLine(line string, width int) []string {
 
 	for _, token := range tokens {
 		if current == "" {
-			current = strings.TrimLeft(token, " ")
-			if current == "" {
+			trimmed := strings.TrimLeft(token, " ")
+			if trimmed == "" {
 				current = indent
+			} else if indent != "" {
+				current = indent + trimmed
+			} else {
+				current = trimmed
 			}
 			continue
 		}
@@ -502,7 +506,7 @@ func wrapRunScreenLine(line string, width int) []string {
 		lines = append(lines, strings.TrimRight(current, " "))
 		if lineIndent == "" {
 			lineIndent = indent
-			if strings.TrimSpace(lineIndent) == "" {
+			if lineIndent == "" {
 				lineIndent = "  "
 			}
 		}
@@ -585,7 +589,7 @@ func runScreenLineStyleKind(line string) string {
 	switch {
 	case strings.HasPrefix(trimmed, "run #"):
 		return "run_header"
-	case strings.HasPrefix(trimmed, "tool:"):
+	case strings.HasPrefix(trimmed, "- ") && strings.Contains(trimmed, "("):
 		return "tool"
 	case strings.HasPrefix(trimmed, "->") || strings.HasPrefix(trimmed, "  ->"):
 		return "result"
