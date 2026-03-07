@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -47,7 +47,7 @@ type runScreenQuitMsg struct{}
 
 type runScreenModel struct {
 	viewport    viewport.Model
-	input       textinput.Model
+	input       textarea.Model
 	width       int
 	height      int
 	promptLabel string
@@ -72,7 +72,7 @@ type runScreenStyles struct {
 	hint      lipgloss.Style
 }
 
-const runScreenBottomChromeLines = 4
+const runScreenFooterBaseLines = 3
 
 func newRunScreenManager(in io.Reader, out io.Writer) *runScreenManager {
 	inputFile, ok := in.(*os.File)
@@ -299,11 +299,24 @@ func newRunScreenModel(
 	onSubmitted func(string),
 	onStop func(),
 ) runScreenModel {
-	input := textinput.New()
+	input := textarea.New()
 	input.Prompt = snapshot.PromptLabel
+	input.ShowLineNumbers = false
 	input.SetValue(runInputValueFromLine(snapshot.InputLine, snapshot.PromptLabel))
 	input.Focus()
 	input.CharLimit = 0
+	input.SetPromptFunc(lipgloss.Width(snapshot.PromptLabel), func(lineIdx int) string {
+		if lineIdx == 0 {
+			return snapshot.PromptLabel
+		}
+		return strings.Repeat(" ", lipgloss.Width(snapshot.PromptLabel))
+	})
+	input.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	input.FocusedStyle.Base = lipgloss.NewStyle()
+	input.FocusedStyle.Text = lipgloss.NewStyle()
+	input.BlurredStyle.CursorLine = lipgloss.NewStyle()
+	input.BlurredStyle.Base = lipgloss.NewStyle()
+	input.BlurredStyle.Text = lipgloss.NewStyle()
 
 	model := runScreenModel{
 		viewport:       viewport.New(0, 0),
@@ -358,6 +371,7 @@ func (m runScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.input.Value() != string(typed) {
 			m.input.SetValue(string(typed))
 			m.input.CursorEnd()
+			m.syncLayout()
 		}
 		return m, nil
 	case runScreenQuitMsg:
@@ -374,6 +388,7 @@ func (m runScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.onSubmitted(m.input.Value())
 			}
 			m.input.SetValue("")
+			m.syncLayout()
 			return m, nil
 		case tea.KeyPgUp, tea.KeyPgDown, tea.KeyUp, tea.KeyDown, tea.KeyHome, tea.KeyEnd:
 			var cmd tea.Cmd
@@ -384,6 +399,7 @@ func (m runScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		previous := m.input.Value()
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(typed)
+		m.syncLayout()
 		if m.input.Value() != previous && m.onInputChanged != nil {
 			m.onInputChanged(m.input.Value())
 		}
@@ -407,18 +423,21 @@ func (m *runScreenModel) syncLayout() {
 		return
 	}
 
-	outputHeight := m.height - runScreenBottomChromeLines
+	m.input.SetWidth(m.width)
+	inputHeight := runInputVisualHeight(m.promptLabel, m.input.Value(), m.width)
+	maxInputHeight := max(1, m.height-runScreenFooterBaseLines-1)
+	if inputHeight > maxInputHeight {
+		inputHeight = maxInputHeight
+	}
+	m.input.SetHeight(inputHeight)
+
+	outputHeight := m.height - (runScreenFooterBaseLines + inputHeight)
 	if outputHeight < 1 {
 		outputHeight = 1
 	}
 
 	m.viewport.Width = m.width
 	m.viewport.Height = outputHeight
-	inputWidth := m.width - lipgloss.Width(m.input.Prompt)
-	if inputWidth < 1 {
-		inputWidth = 1
-	}
-	m.input.Width = inputWidth
 	m.syncViewport(false)
 }
 
@@ -446,6 +465,51 @@ func (m runScreenModel) statusText() string {
 		return "running"
 	}
 	return truncateRunText(strings.TrimSpace(m.statusLine), max(1, m.width-2))
+}
+
+func runInputVisualHeight(promptLabel string, value string, width int) int {
+	if width <= 0 {
+		return 1
+	}
+
+	promptWidth := lipgloss.Width(promptLabel)
+	availableWidth := width - promptWidth
+	if availableWidth < 1 {
+		availableWidth = 1
+	}
+
+	lines := strings.Split(value, "\n")
+	if len(lines) == 0 {
+		return 1
+	}
+
+	height := 0
+	for _, line := range lines {
+		if line == "" {
+			height++
+			continue
+		}
+
+		currentWidth := 0
+		height++
+		for _, r := range line {
+			runeWidth := lipgloss.Width(string(r))
+			if runeWidth <= 0 {
+				runeWidth = 1
+			}
+			if currentWidth+runeWidth > availableWidth {
+				height++
+				currentWidth = runeWidth
+				continue
+			}
+			currentWidth += runeWidth
+		}
+	}
+
+	if height < 1 {
+		return 1
+	}
+	return height
 }
 
 func appendRunScreenText(lines *[]string, current *string, text string) {

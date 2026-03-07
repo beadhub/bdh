@@ -152,3 +152,42 @@ func TestRunScreenViewAddsBottomBreathingSpace(t *testing.T) {
 		t.Fatalf("expected blank line between status and input, got %q", view)
 	}
 }
+
+func TestRunInputVisualHeightWrapsLongInput(t *testing.T) {
+	got := runInputVisualHeight("beadhub:bdh:noah> ", strings.Repeat("x", 40), 30)
+	if got < 2 {
+		t.Fatalf("expected wrapped input height > 1, got %d", got)
+	}
+}
+
+func TestRunScreenViewGrowsInputFooterWhenInputWraps(t *testing.T) {
+	model := newRunScreenModel(
+		runScreenSnapshot{
+			Lines:       []string{"line 1", "line 2"},
+			StatusLine:  "next run in 6s",
+			InputLine:   "beadhub:bdh:noah> " + strings.Repeat("x", 40),
+			PromptLabel: "beadhub:bdh:noah> ",
+		},
+		nil,
+		nil,
+		nil,
+	)
+	model.width = 30
+	model.height = 10
+	model.syncLayout()
+
+	if model.input.Height() < 2 {
+		t.Fatalf("expected multi-line input height, got %d", model.input.Height())
+	}
+	if model.viewport.Height >= 6 {
+		t.Fatalf("expected viewport to shrink for wrapped input, got %d", model.viewport.Height)
+	}
+
+	view := model.View()
+	if !strings.Contains(view, "next run in 6s") {
+		t.Fatalf("expected status line in view, got %q", view)
+	}
+	if !strings.Contains(view, "beadhub:bdh:noah> ") {
+		t.Fatalf("expected prompt label in view, got %q", view)
+	}
+}
