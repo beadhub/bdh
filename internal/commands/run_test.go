@@ -163,6 +163,30 @@ func TestRunLoopFormatsOutput(t *testing.T) {
 	}
 }
 
+func TestComposeRunPromptUsesBaseAndCycleSections(t *testing.T) {
+	got := composeRunPrompt("chat with grace and coordinate", "Respond to unread chat from grace.")
+	if !strings.Contains(got, "Primary mission:\nchat with grace and coordinate") {
+		t.Fatalf("expected primary mission section, got %q", got)
+	}
+	if !strings.Contains(got, "Current cycle:\nRespond to unread chat from grace.") {
+		t.Fatalf("expected current cycle section, got %q", got)
+	}
+}
+
+func TestComposeRunPromptFallsBackToDefaultBasePrompt(t *testing.T) {
+	got := composeRunPrompt("", "")
+	if got != defaultRunBasePrompt {
+		t.Fatalf("expected default base prompt, got %q", got)
+	}
+}
+
+func TestResolveRunMissionPromptPrefersOneRunOverride(t *testing.T) {
+	got := resolveRunMissionPrompt("persistent mission", "one-run override")
+	if got != "one-run override" {
+		t.Fatalf("expected one-run override, got %q", got)
+	}
+}
+
 func TestRunLoopIdleCountdown(t *testing.T) {
 	var slept []time.Duration
 	var output strings.Builder
@@ -460,6 +484,83 @@ func TestRunLoopPromptOverrideFromActiveRun(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(commands[1], " "), "override prompt") {
 		t.Fatalf("expected override prompt on second run, got %q", strings.Join(commands[1], " "))
+	}
+}
+
+func TestRunLoopPromptOverrideForcesRunWhenDispatchWouldSkip(t *testing.T) {
+	controller := newFakeRunInputController()
+	firstRunStarted := make(chan struct{})
+	releaseFirstRun := make(chan struct{})
+	var commands [][]string
+	var mu sync.Mutex
+	runCount := 0
+
+	dispatcher := &fakeRunDispatcher{
+		decisions: []runDispatchDecision{
+			{Prompt: "claimed work", WaitSeconds: 5},
+			{Skip: true, WaitSeconds: 30},
+		},
+	}
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      io.Discard,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		control:  controller,
+		dispatch: dispatcher,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+			mu.Lock()
+			runCount++
+			currentRun := runCount
+			commands = append(commands, append([]string(nil), argv...))
+			mu.Unlock()
+
+			if currentRun == 1 {
+				close(firstRunStarted)
+				<-releaseFirstRun
+			}
+
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- loop.Run(context.Background(), runLoopOptions{
+			Prompt:      "persistent mission",
+			WaitSeconds: 0,
+			MaxRuns:     2,
+		})
+	}()
+
+	select {
+	case <-firstRunStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for first run")
+	}
+
+	controller.send(runControlEvent{Type: runControlPrompt, Text: "one-run override"})
+	close(releaseFirstRun)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("timed out waiting for loop to finish")
+	}
+
+	if len(commands) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(commands))
+	}
+	if !containsText(joinArgs(commands[1]), "one-run override") {
+		t.Fatalf("expected one-run override on forced run, got %q", joinArgs(commands[1]))
+	}
+	if containsText(joinArgs(commands[1]), "persistent mission") {
+		t.Fatalf("expected override to replace persistent mission for one run, got %q", joinArgs(commands[1]))
 	}
 }
 

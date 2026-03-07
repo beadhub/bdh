@@ -79,10 +79,11 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 	}
 }
 
-func TestRunLoopUsesDispatcherAfterInitialPrompt(t *testing.T) {
+func TestRunLoopComposesBasePromptWithDispatcherPrompt(t *testing.T) {
 	dispatcher := &fakeRunDispatcher{
 		decisions: []runDispatchDecision{
-			{Prompt: "dispatch prompt", WaitSeconds: 7},
+			{Prompt: "dispatch prompt one", WaitSeconds: 7},
+			{Prompt: "dispatch prompt two", WaitSeconds: 7},
 		},
 	}
 	var commands [][]string
@@ -111,48 +112,59 @@ func TestRunLoopUsesDispatcherAfterInitialPrompt(t *testing.T) {
 	if len(commands) != 2 {
 		t.Fatalf("expected 2 runs, got %d", len(commands))
 	}
-	if !containsText(joinArgs(commands[0]), "initial prompt") {
-		t.Fatalf("expected first run to use explicit prompt, got %q", joinArgs(commands[0]))
-	}
-	if !containsText(joinArgs(commands[1]), "dispatch prompt") {
-		t.Fatalf("expected second run to use dispatch prompt, got %q", joinArgs(commands[1]))
+	for i, want := range []string{"dispatch prompt one", "dispatch prompt two"} {
+		cmd := joinArgs(commands[i])
+		if !containsText(cmd, "initial prompt") {
+			t.Fatalf("expected base prompt in run %d, got %q", i+1, cmd)
+		}
+		if !containsText(cmd, want) {
+			t.Fatalf("expected dispatch prompt %q in run %d, got %q", want, i+1, cmd)
+		}
 	}
 }
 
-func TestRunLoopFallsBackToExplicitPromptOnDispatchError(t *testing.T) {
+func TestRunLoopWaitsForDispatchRecoveryOnDispatchErrorEvenWithBasePrompt(t *testing.T) {
 	dispatcher := &fakeRunDispatcher{err: errors.New("server down")}
-	var commands [][]string
 	var output strings.Builder
+	var slept []time.Duration
 
 	loop := &runLoop{
 		provider: claudeProvider{},
 		now:      time.Now,
 		out:      &output,
-		sleep:    func(context.Context, time.Duration) error { return nil },
+		defaults: runDispatchDefaults{IdleWaitSeconds: 1},
+		sleep: func(_ context.Context, d time.Duration) error {
+			slept = append(slept, d)
+			return nil
+		},
 		dispatch: dispatcher,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
-			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+		runner: func(_ context.Context, _ string, _ []string, _ func(string)) error {
+			t.Fatal("runner should not be called")
 			return nil
 		},
 	}
 
-	err := loop.Run(context.Background(), runLoopOptions{
+	ctx, cancel := context.WithCancel(context.Background())
+	loop.sleep = func(_ context.Context, d time.Duration) error {
+		slept = append(slept, d)
+		cancel()
+		return nil
+	}
+	err := loop.Run(ctx, runLoopOptions{
 		Prompt:      "stable prompt",
 		WaitSeconds: 0,
-		MaxRuns:     2,
 	})
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
 	}
-	if len(commands) != 2 {
-		t.Fatalf("expected 2 runs, got %d", len(commands))
-	}
-	if !containsText(joinArgs(commands[1]), "stable prompt") {
-		t.Fatalf("expected fallback explicit prompt, got %q", joinArgs(commands[1]))
+	if len(slept) == 0 {
+		t.Fatal("expected idle sleep while waiting for dispatch recovery")
 	}
 	if !containsText(output.String(), "dispatch failed: server down") {
 		t.Fatalf("expected dispatch failure log, got %q", output.String())
+	}
+	if !containsText(output.String(), "waiting for dispatch recovery") {
+		t.Fatalf("expected dispatch recovery log, got %q", output.String())
 	}
 }
 

@@ -44,10 +44,13 @@ type runLoopOptions struct {
 }
 
 type runCycleDecision struct {
-	Prompt      string
-	WaitSeconds int
-	Skip        bool
+	MissionPrompt string
+	Prompt        string
+	WaitSeconds   int
+	Skip          bool
 }
+
+const defaultRunBasePrompt = "Work autonomously in this repository. Use BeadHub to coordinate, respond to pending communication, and advance the highest-priority available work."
 
 type runState struct {
 	Run            int
@@ -174,10 +177,6 @@ func init() {
 }
 
 func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
-	if strings.TrimSpace(opts.Prompt) == "" && l.dispatch == nil {
-		return fmt.Errorf("prompt cannot be empty")
-	}
-
 	if l.control != nil {
 		if err := l.control.Start(); err != nil {
 			return err
@@ -212,8 +211,11 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 			continue
 		}
 
+		missionPrompt := resolveRunMissionPrompt(opts.Prompt, decision.MissionPrompt)
+		prompt := composeRunPrompt(missionPrompt, decision.Prompt)
+		displayPrompt := runDisplayPrompt(missionPrompt, decision.Prompt)
 		state.Run++
-		if err := l.runOnce(ctx, opts, state, decision.Prompt); err != nil {
+		if err := l.runOnce(ctx, opts, state, prompt, displayPrompt); err != nil {
 			if state.StopRequested && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 				return nil
 			}
@@ -235,36 +237,45 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 }
 
 func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *runState) (runCycleDecision, error) {
-	if strings.TrimSpace(state.NextPrompt) != "" {
-		prompt := state.NextPrompt
+	queuedMissionPrompt := strings.TrimSpace(state.NextPrompt)
+	if queuedMissionPrompt != "" {
 		state.NextPrompt = ""
-		return runCycleDecision{Prompt: prompt, WaitSeconds: opts.WaitSeconds}, nil
-	}
-	if !state.RanOnce && strings.TrimSpace(opts.Prompt) != "" {
-		return runCycleDecision{Prompt: opts.Prompt, WaitSeconds: opts.WaitSeconds}, nil
 	}
 	if l.dispatch != nil {
 		decision, err := l.dispatch.Next(ctx)
 		if err != nil {
 			l.printf("info: dispatch failed: %v\n", err)
-			if strings.TrimSpace(opts.Prompt) != "" {
-				l.println("info: falling back to the explicit prompt.")
-				return runCycleDecision{Prompt: opts.Prompt, WaitSeconds: opts.WaitSeconds}, nil
+			if queuedMissionPrompt != "" {
+				l.println("info: using queued prompt while dispatch recovers.")
+				return runCycleDecision{
+					MissionPrompt: queuedMissionPrompt,
+					WaitSeconds:   opts.WaitSeconds,
+				}, nil
 			}
 			defaults := withRunDispatchDefaults(l.defaults)
 			l.println("info: waiting for dispatch recovery before starting a run.")
 			return runCycleDecision{WaitSeconds: defaults.IdleWaitSeconds, Skip: true}, nil
 		}
-		return runCycleDecision{
-			Prompt:      decision.Prompt,
-			WaitSeconds: decision.WaitSeconds,
-			Skip:        decision.Skip,
-		}, nil
+		cycle := runCycleDecision{
+			MissionPrompt: queuedMissionPrompt,
+			Prompt:        decision.Prompt,
+			WaitSeconds:   decision.WaitSeconds,
+			Skip:          decision.Skip,
+		}
+		if queuedMissionPrompt != "" && cycle.Skip {
+			cycle.Skip = false
+			cycle.WaitSeconds = opts.WaitSeconds
+		}
+		return cycle, nil
 	}
-	return runCycleDecision{Prompt: opts.Prompt, WaitSeconds: opts.WaitSeconds}, nil
+	return runCycleDecision{
+		MissionPrompt: queuedMissionPrompt,
+		Prompt:        "",
+		WaitSeconds:   opts.WaitSeconds,
+	}, nil
 }
 
-func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runState, prompt string) error {
+func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runState, prompt string, displayPrompt string) error {
 	buildOpts := runBuildOptions{
 		AllowedTools: opts.AllowedTools,
 		Model:        opts.Model,
@@ -282,7 +293,7 @@ func (l *runLoop) runOnce(ctx context.Context, opts runLoopOptions, state *runSt
 		return err
 	}
 
-	l.printf("\nrun #%d  %s  >  %s\n\n", state.Run, l.now().Format("15:04:05"), truncateRunText(prompt, 80))
+	l.printf("\nrun #%d  %s  >  %s\n\n", state.Run, l.now().Format("15:04:05"), truncateRunText(displayPrompt, 80))
 	l.println("type /wait, /stop, /quit, or start typing to queue a prompt.")
 	l.clearStatusLine()
 	l.renderInputPrompt(state)
@@ -687,6 +698,42 @@ func (l *runLoop) renderIdleLine(label string, remaining int, state *runState) {
 		line = fmt.Sprintf("%s  >  %s", line, state.InputBuffer)
 	}
 	fmt.Fprintf(l.out, "\r\033[K%s", line)
+}
+
+func resolveRunBasePrompt(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt != "" {
+		return prompt
+	}
+	return defaultRunBasePrompt
+}
+
+func resolveRunMissionPrompt(basePrompt string, overridePrompt string) string {
+	overridePrompt = strings.TrimSpace(overridePrompt)
+	if overridePrompt != "" {
+		return overridePrompt
+	}
+	return resolveRunBasePrompt(basePrompt)
+}
+
+func composeRunPrompt(missionPrompt string, cyclePrompt string) string {
+	missionPrompt = strings.TrimSpace(missionPrompt)
+	if missionPrompt == "" {
+		missionPrompt = defaultRunBasePrompt
+	}
+	cyclePrompt = strings.TrimSpace(cyclePrompt)
+	if cyclePrompt == "" {
+		return missionPrompt
+	}
+	return fmt.Sprintf("Primary mission:\n%s\n\nCurrent cycle:\n%s", missionPrompt, cyclePrompt)
+}
+
+func runDisplayPrompt(missionPrompt string, cyclePrompt string) string {
+	cyclePrompt = strings.TrimSpace(cyclePrompt)
+	if cyclePrompt != "" {
+		return cyclePrompt
+	}
+	return strings.TrimSpace(missionPrompt)
 }
 
 func (l *runLoop) setStatusLine(text string) {
