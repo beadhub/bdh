@@ -65,7 +65,7 @@ func TestResolveRunSettingsPrecedence(t *testing.T) {
 		IdleWaitSeconds:   &idleWait,
 	}
 
-	settings, err := resolveRunSettings(cfg, true, 7, true, 13)
+	settings, err := resolveRunSettings(cfg, false, "", false, "", false, "", true, 7, true, 13)
 	if err != nil {
 		t.Fatalf("resolveRunSettings returned error: %v", err)
 	}
@@ -83,5 +83,37 @@ func TestResolveRunSettingsPrecedence(t *testing.T) {
 	}
 	if settings.CommsPromptSuffix != "config comms suffix" {
 		t.Fatalf("expected comms suffix from config, got %q", settings.CommsPromptSuffix)
+	}
+}
+
+func TestResolveRunSettingsPromptFlagsOverrideConfig(t *testing.T) {
+	basePrompt := "config base"
+	workSuffix := "config work suffix"
+	commsSuffix := "config comms suffix"
+	cfg := runUserConfig{
+		BasePrompt:        &basePrompt,
+		WorkPromptSuffix:  &workSuffix,
+		CommsPromptSuffix: &commsSuffix,
+	}
+
+	settings, err := resolveRunSettings(
+		cfg,
+		true, "flag base",
+		true, "flag work",
+		true, "flag comms",
+		false, 0,
+		false, 0,
+	)
+	if err != nil {
+		t.Fatalf("resolveRunSettings returned error: %v", err)
+	}
+	if settings.BasePrompt != "flag base" {
+		t.Fatalf("expected base prompt from flag, got %q", settings.BasePrompt)
+	}
+	if settings.WorkPromptSuffix != "flag work" {
+		t.Fatalf("expected work suffix from flag, got %q", settings.WorkPromptSuffix)
+	}
+	if settings.CommsPromptSuffix != "flag comms" {
+		t.Fatalf("expected comms suffix from flag, got %q", settings.CommsPromptSuffix)
 	}
 }

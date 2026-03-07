@@ -61,6 +61,12 @@ func runUserConfigPath() (string, error) {
 
 func resolveRunSettings(
 	cfg runUserConfig,
+	basePromptFlagSet bool,
+	basePromptFlagValue string,
+	workPromptFlagSet bool,
+	workPromptFlagValue string,
+	commsPromptFlagSet bool,
+	commsPromptFlagValue string,
 	waitFlagSet bool,
 	waitFlagValue int,
 	idleWaitFlagSet bool,
@@ -88,6 +94,15 @@ func resolveRunSettings(
 	}
 	if cfg.IdleWaitSeconds != nil {
 		settings.IdleWaitSeconds = *cfg.IdleWaitSeconds
+	}
+	if basePromptFlagSet {
+		settings.BasePrompt = basePromptFlagValue
+	}
+	if workPromptFlagSet {
+		settings.WorkPromptSuffix = workPromptFlagValue
+	}
+	if commsPromptFlagSet {
+		settings.CommsPromptSuffix = commsPromptFlagValue
 	}
 	if waitFlagSet {
 		settings.WaitSeconds = waitFlagValue

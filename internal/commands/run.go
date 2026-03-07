@@ -72,6 +72,9 @@ var (
 	runSessionMode  bool
 	runMaxRuns      int
 	runIdleWait     int
+	runBasePrompt   string
+	runWorkPrompt   string
+	runCommsPrompt  string
 	runWorkingDir   string
 	runAllowedTools string
 	runModel        string
@@ -109,6 +112,9 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		}
 		settings, err := resolveRunSettings(
 			runCfg,
+			cmd.Flags().Changed("base-prompt"), runBasePrompt,
+			cmd.Flags().Changed("work-prompt-suffix"), runWorkPrompt,
+			cmd.Flags().Changed("comms-prompt-suffix"), runCommsPrompt,
 			cmd.Flags().Changed("wait"), runWaitSeconds,
 			cmd.Flags().Changed("idle-wait"), runIdleWait,
 		)
@@ -181,6 +187,9 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 }
 
 func init() {
+	runCmd.Flags().StringVar(&runBasePrompt, "base-prompt", "", "Override the configured base mission prompt for this run")
+	runCmd.Flags().StringVar(&runWorkPrompt, "work-prompt-suffix", "", "Override the configured work cycle prompt suffix for this run")
+	runCmd.Flags().StringVar(&runCommsPrompt, "comms-prompt-suffix", "", "Override the configured comms cycle prompt suffix for this run")
 	runCmd.Flags().IntVar(&runWaitSeconds, "wait", defaultRunWaitSeconds, "Idle seconds between runs")
 	runCmd.Flags().IntVar(&runIdleWait, "idle-wait", defaultRunIdleWaitSeconds, "Idle seconds between runs when nothing needs attention")
 	runCmd.Flags().BoolVar(&runSessionMode, "session", false, "Resume the same provider session across runs")

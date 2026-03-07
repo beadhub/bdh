@@ -18,7 +18,7 @@ const (
 
 func initRunUserConfig(in io.Reader, out io.Writer, existing runUserConfig) error {
 	reader := bufio.NewReader(in)
-	current, err := resolveRunSettings(existing, false, 0, false, 0)
+	current, err := resolveRunSettings(existing, false, "", false, "", false, "", false, 0, false, 0)
 	if err != nil {
 		return err
 	}
