@@ -72,6 +72,8 @@ type runScreenStyles struct {
 	hint      lipgloss.Style
 }
 
+const runScreenBottomChromeLines = 4
+
 func newRunScreenManager(in io.Reader, out io.Writer) *runScreenManager {
 	inputFile, ok := in.(*os.File)
 	if !ok || !term.IsTerminal(int(inputFile.Fd())) {
@@ -322,7 +324,7 @@ func newRunScreenModel(
 func newRunScreenStyles() runScreenStyles {
 	return runScreenStyles{
 		runHeader: lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "24", Dark: "12"}).Bold(true),
-		tool:      lipgloss.NewStyle().Bold(true),
+		tool:      lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "130", Dark: "214"}).Bold(true),
 		result:    lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "23", Dark: "14"}),
 		done:      lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "10"}).Bold(true),
 		info:      lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "8"}),
@@ -397,7 +399,7 @@ func (m runScreenModel) View() string {
 	}
 
 	status := m.styles.status.Width(m.width).Render(m.statusText())
-	return m.viewport.View() + "\n" + status + "\n" + m.input.View()
+	return m.viewport.View() + "\n\n" + status + "\n\n" + m.input.View()
 }
 
 func (m *runScreenModel) syncLayout() {
@@ -405,7 +407,7 @@ func (m *runScreenModel) syncLayout() {
 		return
 	}
 
-	outputHeight := m.height - 2
+	outputHeight := m.height - runScreenBottomChromeLines
 	if outputHeight < 1 {
 		outputHeight = 1
 	}

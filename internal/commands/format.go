@@ -81,7 +81,12 @@ func formatRunToolSummaryArgs(data map[string]any) []string {
 		return nil
 	}
 	sort.SliceStable(keys, func(i, j int) bool {
-		return runToolSummaryKeyRank(keys[i]) < runToolSummaryKeyRank(keys[j])
+		leftRank := runToolSummaryKeyRank(keys[i])
+		rightRank := runToolSummaryKeyRank(keys[j])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return keys[i] < keys[j]
 	})
 
 	args := make([]string, 0, len(keys))
@@ -117,10 +122,12 @@ func runToolSummaryKeyRank(key string) int {
 		return 1
 	case "query":
 		return 2
-	case "path":
+	case "file_path":
 		return 3
-	case "url":
+	case "path":
 		return 4
+	case "url":
+		return 5
 	default:
 		return 10
 	}

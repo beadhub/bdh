@@ -1,6 +1,9 @@
 package commands
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestAppendRunScreenTextTracksCompleteAndPartialLines(t *testing.T) {
 	lines := []string{}
@@ -122,5 +125,30 @@ func TestWrapRunScreenLineKeepsToolArgIndent(t *testing.T) {
 		if line == "" || line[:7] != "       " {
 			t.Fatalf("expected wrapped continuation lines to keep tool arg indentation, got %#v", lines)
 		}
+	}
+}
+
+func TestRunScreenViewAddsBottomBreathingSpace(t *testing.T) {
+	model := newRunScreenModel(
+		runScreenSnapshot{
+			Lines:       []string{"line 1"},
+			StatusLine:  "next run in 6s",
+			InputLine:   "beadhub:bdh:noah> hello",
+			PromptLabel: "beadhub:bdh:noah> ",
+		},
+		nil,
+		nil,
+		nil,
+	)
+	model.width = 40
+	model.height = 10
+	model.syncLayout()
+
+	view := model.View()
+	if !strings.Contains(view, "\n\n next run in 6s") {
+		t.Fatalf("expected blank line before status line, got %q", view)
+	}
+	if !strings.Contains(view, "next run in 6s") || !strings.Contains(view, "\n\nbeadhub:bdh:noah> hello") {
+		t.Fatalf("expected blank line between status and input, got %q", view)
 	}
 }
