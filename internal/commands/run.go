@@ -298,30 +298,24 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 	if explicitMissionPrompt == "" && state.Run == 0 {
 		explicitMissionPrompt = strings.TrimSpace(opts.InitialPrompt)
 	}
+	if explicitMissionPrompt != "" {
+		return runCycleDecision{
+			MissionPrompt: explicitMissionPrompt,
+			WaitSeconds:   opts.WaitSeconds,
+		}, nil
+	}
 	if l.dispatch != nil {
 		decision, err := l.dispatch.Next(ctx)
 		if err != nil {
 			l.printf("info: dispatch failed: %v\n", err)
-			if explicitMissionPrompt != "" {
-				l.println("info: using queued prompt while dispatch recovers.")
-				return runCycleDecision{
-					MissionPrompt: explicitMissionPrompt,
-					WaitSeconds:   opts.WaitSeconds,
-				}, nil
-			}
 			defaults := withRunDispatchDefaults(l.defaults)
 			l.println("info: waiting for dispatch recovery before starting a run.")
 			return runCycleDecision{WaitSeconds: defaults.IdleWaitSeconds, Skip: true}, nil
 		}
 		cycle := runCycleDecision{
-			MissionPrompt: explicitMissionPrompt,
 			Prompt:        decision.Prompt,
 			WaitSeconds:   decision.WaitSeconds,
 			Skip:          decision.Skip,
-		}
-		if explicitMissionPrompt != "" && cycle.Skip {
-			cycle.Skip = false
-			cycle.WaitSeconds = opts.WaitSeconds
 		}
 		return cycle, nil
 	}
