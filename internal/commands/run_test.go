@@ -741,6 +741,43 @@ func TestRunLoopPromptOverrideForcesRunWhenDispatchWouldSkip(t *testing.T) {
 	}
 }
 
+func TestRunLoopInitialPromptForcesRunWhenDispatchWouldSkip(t *testing.T) {
+	dispatcher := &fakeRunDispatcher{
+		decisions: []runDispatchDecision{
+			{Skip: true, WaitSeconds: 30},
+		},
+	}
+	var commands [][]string
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      io.Discard,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		dispatch: dispatcher,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+			commands = append(commands, append([]string(nil), argv...))
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		InitialPrompt: "are we ready to release",
+		WaitSeconds:   0,
+		MaxRuns:       1,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("expected initial prompt to force one run, got %d runs", len(commands))
+	}
+	if !containsText(joinArgs(commands[0]), "are we ready to release") {
+		t.Fatalf("expected initial prompt in forced run, got %q", joinArgs(commands[0]))
+	}
+}
+
 func TestRunLoopTypingDuringActiveRunDoesNotPauseLoop(t *testing.T) {
 	controller := newFakeRunInputController()
 	firstRunStarted := make(chan struct{})

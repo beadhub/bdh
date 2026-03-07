@@ -244,9 +244,6 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 		}
 
 		baseMissionPrompt := strings.TrimSpace(opts.Prompt)
-		if state.Run == 0 && strings.TrimSpace(opts.InitialPrompt) != "" {
-			baseMissionPrompt = strings.TrimSpace(opts.InitialPrompt)
-		}
 		missionPrompt := resolveRunMissionPrompt(baseMissionPrompt, decision.MissionPrompt)
 		prompt := composeRunPrompt(missionPrompt, decision.Prompt)
 		displayPrompt := runDisplayPrompt(missionPrompt, decision.Prompt)
@@ -284,14 +281,18 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 	if queuedMissionPrompt != "" {
 		state.NextPrompt = ""
 	}
+	explicitMissionPrompt := queuedMissionPrompt
+	if explicitMissionPrompt == "" && state.Run == 0 {
+		explicitMissionPrompt = strings.TrimSpace(opts.InitialPrompt)
+	}
 	if l.dispatch != nil {
 		decision, err := l.dispatch.Next(ctx)
 		if err != nil {
 			l.printf("info: dispatch failed: %v\n", err)
-			if queuedMissionPrompt != "" {
+			if explicitMissionPrompt != "" {
 				l.println("info: using queued prompt while dispatch recovers.")
 				return runCycleDecision{
-					MissionPrompt: queuedMissionPrompt,
+					MissionPrompt: explicitMissionPrompt,
 					WaitSeconds:   opts.WaitSeconds,
 				}, nil
 			}
@@ -300,19 +301,19 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 			return runCycleDecision{WaitSeconds: defaults.IdleWaitSeconds, Skip: true}, nil
 		}
 		cycle := runCycleDecision{
-			MissionPrompt: queuedMissionPrompt,
+			MissionPrompt: explicitMissionPrompt,
 			Prompt:        decision.Prompt,
 			WaitSeconds:   decision.WaitSeconds,
 			Skip:          decision.Skip,
 		}
-		if queuedMissionPrompt != "" && cycle.Skip {
+		if explicitMissionPrompt != "" && cycle.Skip {
 			cycle.Skip = false
 			cycle.WaitSeconds = opts.WaitSeconds
 		}
 		return cycle, nil
 	}
 	return runCycleDecision{
-		MissionPrompt: queuedMissionPrompt,
+		MissionPrompt: explicitMissionPrompt,
 		Prompt:        "",
 		WaitSeconds:   opts.WaitSeconds,
 	}, nil
