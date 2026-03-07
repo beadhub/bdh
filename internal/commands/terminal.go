@@ -43,12 +43,15 @@ func parseRunControlSubmission(text string) runControlEvent {
 }
 
 func runInputValueFromLine(line string) string {
-	line = strings.TrimSpace(line)
+	line = strings.TrimLeft(line, " \t")
 	if line == "" || line == "input>" {
 		return ""
 	}
 	if strings.HasPrefix(line, "input> ") {
 		return strings.TrimPrefix(line, "input> ")
+	}
+	if strings.HasPrefix(line, "input>") {
+		return strings.TrimPrefix(line, "input>")
 	}
 	return line
 }

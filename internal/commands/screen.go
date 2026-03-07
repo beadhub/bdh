@@ -196,8 +196,8 @@ func (s *runScreenManager) SetInputLine(line string) {
 	value := runInputValueFromLine(line)
 
 	s.mu.Lock()
-	s.pending = strings.TrimSpace(value) != ""
-	if strings.TrimSpace(value) == "" {
+	s.pending = value != ""
+	if value == "" {
 		s.inputLine = "input> "
 	} else {
 		s.inputLine = "input> " + value
@@ -254,15 +254,15 @@ func (s *runScreenManager) emit(event runControlEvent) {
 func (s *runScreenManager) handleInputChanged(value string) {
 	s.mu.Lock()
 	wasPending := s.pending
-	s.pending = strings.TrimSpace(value) != ""
-	if strings.TrimSpace(value) == "" {
+	s.pending = value != ""
+	if value == "" {
 		s.inputLine = "input> "
 	} else {
 		s.inputLine = "input> " + value
 	}
 	s.mu.Unlock()
 
-	if !wasPending && strings.TrimSpace(value) != "" {
+	if !wasPending && value != "" {
 		s.emit(runControlEvent{Type: runControlTypingStarted})
 	}
 	s.emit(runControlEvent{Type: runControlBufferUpdated, Text: value})

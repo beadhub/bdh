@@ -61,3 +61,28 @@ func TestParseRunControlSubmission(t *testing.T) {
 		}
 	}
 }
+
+func TestRunInputValueFromLinePreservesSpaces(t *testing.T) {
+	got := runInputValueFromLine("input> hello world ")
+	if got != "hello world " {
+		t.Fatalf("expected trailing/internal spaces to be preserved, got %q", got)
+	}
+
+	got = runInputValueFromLine("input>  leading")
+	if got != " leading" {
+		t.Fatalf("expected leading spaces after prompt to be preserved, got %q", got)
+	}
+}
+
+func TestRunScreenSetInputLineKeepsLeadingSpace(t *testing.T) {
+	screen := &runScreenManager{}
+
+	screen.SetInputLine("input>  leading")
+
+	if !screen.pending {
+		t.Fatal("expected leading-space input to count as pending")
+	}
+	if screen.inputLine != "input>  leading" {
+		t.Fatalf("expected input line to preserve leading space, got %q", screen.inputLine)
+	}
+}

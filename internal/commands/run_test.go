@@ -579,6 +579,21 @@ func TestApplyControlEvent_BufferUpdatedRendersInputPromptOnScreen(t *testing.T)
 	}
 }
 
+func TestApplyControlEvent_BufferUpdatedPreservesLeadingSpace(t *testing.T) {
+	screen := &runScreenManager{}
+	loop := &runLoop{screen: screen}
+	state := &runState{Paused: true}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: " leading"}, state, false, nil)
+
+	if !state.PendingInput {
+		t.Fatal("expected leading-space input to remain pending")
+	}
+	if screen.inputLine != "input>  leading" {
+		t.Fatalf("expected screen input line to preserve leading space, got %q", screen.inputLine)
+	}
+}
+
 func TestShouldSuppressText_PromptEcho(t *testing.T) {
 	var output strings.Builder
 	loop := &runLoop{out: &output}

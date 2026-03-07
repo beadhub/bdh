@@ -27,6 +27,7 @@ func (f *fakeRunDispatcher) Next(context.Context) (runDispatchDecision, error) {
 }
 
 func TestSelectRunDispatchPriority(t *testing.T) {
+	defaults := withRunDispatchDefaults(runDispatchDefaults{})
 	claim := ClaimInfo{BeadID: "bdh-421.3", Title: "Dispatch logic"}
 	task := runReadyTask{ID: "bdh-54y", Title: "List active"}
 
@@ -35,7 +36,7 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 		UnreadMailCount:  3,
 		CurrentClaim:     &claim,
 		ReadyTask:        &task,
-	})
+	}, defaults)
 	if !containsText(chatDecision.Prompt, "Respond to chat from grace") {
 		t.Fatalf("expected chat prompt, got: %q", chatDecision.Prompt)
 	}
@@ -48,7 +49,7 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 		UnreadMailFrom:  "mia",
 		CurrentClaim:    &claim,
 		ReadyTask:       &task,
-	})
+	}, defaults)
 	if !containsText(mailDecision.Prompt, "unread mail from mia") {
 		t.Fatalf("expected mail prompt, got: %q", mailDecision.Prompt)
 	}
@@ -56,7 +57,7 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 	claimDecision := selectRunDispatch(runDispatchSummary{
 		CurrentClaim: &claim,
 		ReadyTask:    &task,
-	})
+	}, defaults)
 	if !containsText(claimDecision.Prompt, "Continue working on bdh-421.3: Dispatch logic") {
 		t.Fatalf("expected current-claim prompt, got: %q", claimDecision.Prompt)
 	}
@@ -64,12 +65,12 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 		t.Fatalf("expected review reminder, got: %q", claimDecision.Prompt)
 	}
 
-	readyDecision := selectRunDispatch(runDispatchSummary{ReadyTask: &task})
+	readyDecision := selectRunDispatch(runDispatchSummary{ReadyTask: &task}, defaults)
 	if !containsText(readyDecision.Prompt, "Pick up bdh-54y: List active") {
 		t.Fatalf("expected ready-task prompt, got: %q", readyDecision.Prompt)
 	}
 
-	idleDecision := selectRunDispatch(runDispatchSummary{})
+	idleDecision := selectRunDispatch(runDispatchSummary{}, defaults)
 	if idleDecision.WaitSeconds != 30 {
 		t.Fatalf("expected long idle wait, got %d", idleDecision.WaitSeconds)
 	}

@@ -28,6 +28,7 @@ type runLoop struct {
 	out      io.Writer
 	control  runInputController
 	dispatch runDispatcher
+	defaults runDispatchDefaults
 	screen   *runScreenManager
 	writeMu  sync.Mutex
 }
@@ -62,8 +63,10 @@ var (
 	runWaitSeconds  int
 	runSessionMode  bool
 	runMaxRuns      int
+	runIdleWait     int
 	runWorkingDir   string
 	runAllowedTools string
+	runIdlePrompt   string
 	runModel        string
 	runProviderName string
 )
@@ -84,11 +87,22 @@ Current implementation includes:
 Future provider work will add non-Claude backends on top of the same loop.`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if runWaitSeconds < 0 {
-			return fmt.Errorf("--wait must be >= 0")
-		}
 		if runMaxRuns < 0 {
 			return fmt.Errorf("--max-runs must be >= 0")
+		}
+
+		runCfg, err := loadRunUserConfig()
+		if err != nil {
+			return err
+		}
+		settings, err := resolveRunSettings(
+			runCfg,
+			cmd.Flags().Changed("wait"), runWaitSeconds,
+			cmd.Flags().Changed("idle-prompt"), runIdlePrompt,
+			cmd.Flags().Changed("idle-wait"), runIdleWait,
+		)
+		if err != nil {
+			return err
 		}
 
 		provider, err := newRunProvider(runProviderName)
@@ -96,11 +110,16 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 			return err
 		}
 
+		dispatchDefaults := runDispatchDefaults{
+			IdlePrompt:      settings.IdlePrompt,
+			IdleWaitSeconds: settings.IdleWaitSeconds,
+		}
+
 		var dispatcher runDispatcher
 		cfg, cfgErr := loadAndValidateConfig()
 		if cfgErr == nil {
 			if aw, awErr := newAwebClientRequired(cfg.BeadhubURL); awErr == nil {
-				dispatcher = newBeadhubRunDispatcher(cfg, aw)
+				dispatcher = newBeadhubRunDispatcher(cfg, aw, dispatchDefaults)
 			}
 		}
 
@@ -117,12 +136,13 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 			out:      cmd.OutOrStdout(),
 			control:  screen,
 			dispatch: dispatcher,
+			defaults: dispatchDefaults,
 			screen:   screen,
 		}
 
 		opts := runLoopOptions{
 			Prompt:       strings.Join(args, " "),
-			WaitSeconds:  runWaitSeconds,
+			WaitSeconds:  settings.WaitSeconds,
 			MaxRuns:      runMaxRuns,
 			SessionMode:  runSessionMode,
 			WorkingDir:   runWorkingDir,
@@ -139,11 +159,13 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 }
 
 func init() {
-	runCmd.Flags().IntVar(&runWaitSeconds, "wait", 20, "Idle seconds between runs")
+	runCmd.Flags().IntVar(&runWaitSeconds, "wait", defaultRunWaitSeconds, "Idle seconds between runs")
+	runCmd.Flags().IntVar(&runIdleWait, "idle-wait", defaultRunIdleWaitSeconds, "Idle seconds between runs when nothing needs attention")
 	runCmd.Flags().BoolVar(&runSessionMode, "session", false, "Resume the same provider session across runs")
 	runCmd.Flags().IntVar(&runMaxRuns, "max-runs", 0, "Stop after N runs (0 means infinite)")
 	runCmd.Flags().StringVar(&runWorkingDir, "dir", "", "Working directory for the agent process")
 	runCmd.Flags().StringVar(&runAllowedTools, "allowed-tools", "", "Provider-specific allowed tools string")
+	runCmd.Flags().StringVar(&runIdlePrompt, "idle-prompt", "", "Idle prompt override when nothing needs attention")
 	runCmd.Flags().StringVar(&runModel, "model", "", "Provider-specific model override")
 	runCmd.Flags().StringVar(&runProviderName, "provider", "claude", "Agent provider to run")
 }
@@ -217,7 +239,7 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 				l.println("info: falling back to the explicit prompt.")
 				return opts.Prompt, opts.WaitSeconds, nil
 			}
-			fallback := selectRunDispatch(runDispatchSummary{})
+			fallback := selectRunDispatch(runDispatchSummary{}, l.defaults)
 			l.println("info: falling back to idle prompt until dispatch recovers.")
 			return fallback.Prompt, fallback.WaitSeconds, nil
 		}
@@ -515,7 +537,7 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		l.renderInputPrompt(state)
 	case runControlBufferUpdated:
 		state.InputBuffer = event.Text
-		state.PendingInput = strings.TrimSpace(event.Text) != ""
+		state.PendingInput = event.Text != ""
 		l.renderInputPrompt(state)
 	case runControlPrompt:
 		state.PendingInput = false
@@ -604,7 +626,7 @@ func (l *runLoop) renderInputPrompt(state *runState) {
 	if state == nil {
 		return
 	}
-	if !state.PendingInput && !state.Paused && strings.TrimSpace(state.InputBuffer) == "" {
+	if !state.PendingInput && !state.Paused && state.InputBuffer == "" {
 		if l.screen != nil {
 			l.screen.SetInputLine("input> ")
 		}
@@ -612,7 +634,7 @@ func (l *runLoop) renderInputPrompt(state *runState) {
 	}
 
 	prompt := "input> " + state.InputBuffer
-	if state.Paused && strings.TrimSpace(state.InputBuffer) == "" {
+	if state.Paused && state.InputBuffer == "" {
 		prompt = "input> "
 	}
 

@@ -36,16 +36,23 @@ type runReadyTask struct {
 	Title string `json:"title"`
 }
 
+type runDispatchDefaults struct {
+	IdlePrompt      string
+	IdleWaitSeconds int
+}
+
 type beadhubRunDispatcher struct {
 	cfg        *config.Config
 	aw         *aweb.Client
+	defaults   runDispatchDefaults
 	readyTasks func(ctx context.Context) ([]runReadyTask, error)
 }
 
-func newBeadhubRunDispatcher(cfg *config.Config, aw *aweb.Client) runDispatcher {
+func newBeadhubRunDispatcher(cfg *config.Config, aw *aweb.Client, defaults runDispatchDefaults) runDispatcher {
 	dispatcher := &beadhubRunDispatcher{
-		cfg: cfg,
-		aw:  aw,
+		cfg:      cfg,
+		aw:       aw,
+		defaults: withRunDispatchDefaults(defaults),
 	}
 	dispatcher.readyTasks = dispatcher.fetchReadyTasks
 	return dispatcher
@@ -56,7 +63,7 @@ func (d *beadhubRunDispatcher) Next(ctx context.Context) (runDispatchDecision, e
 	if err != nil {
 		return runDispatchDecision{}, err
 	}
-	return selectRunDispatch(summary), nil
+	return selectRunDispatch(summary, d.defaults), nil
 }
 
 func (d *beadhubRunDispatcher) summary(ctx context.Context) (runDispatchSummary, error) {
@@ -112,7 +119,19 @@ func (d *beadhubRunDispatcher) fetchReadyTasks(ctx context.Context) ([]runReadyT
 	return tasks, nil
 }
 
-func selectRunDispatch(summary runDispatchSummary) runDispatchDecision {
+func withRunDispatchDefaults(defaults runDispatchDefaults) runDispatchDefaults {
+	if strings.TrimSpace(defaults.IdlePrompt) == "" {
+		defaults.IdlePrompt = defaultRunIdlePrompt
+	}
+	if defaults.IdleWaitSeconds == 0 {
+		defaults.IdleWaitSeconds = defaultRunIdleWaitSeconds
+	}
+	return defaults
+}
+
+func selectRunDispatch(summary runDispatchSummary, defaults runDispatchDefaults) runDispatchDecision {
+	defaults = withRunDispatchDefaults(defaults)
+
 	switch {
 	case strings.TrimSpace(summary.PendingChatAlias) != "":
 		return runDispatchDecision{
@@ -140,8 +159,8 @@ func selectRunDispatch(summary runDispatchSummary) runDispatchDecision {
 		}
 	default:
 		return runDispatchDecision{
-			Prompt:      "Check for pending chat messages or unread mail. If nothing needs attention, wait for new work.",
-			WaitSeconds: 30,
+			Prompt:      defaults.IdlePrompt,
+			WaitSeconds: defaults.IdleWaitSeconds,
 		}
 	}
 }
