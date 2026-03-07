@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	aweb "github.com/awebai/aw"
-	"github.com/awebai/aw/chat"
 	"github.com/beadhub/bdh/internal/bd"
 	"github.com/beadhub/bdh/internal/beads"
 	"github.com/beadhub/bdh/internal/config"
@@ -25,11 +24,26 @@ type runDispatchDecision struct {
 }
 
 type runDispatchSummary struct {
-	PendingChatAlias string
-	UnreadMailCount  int
-	UnreadMailFrom   string
-	CurrentClaim     *ClaimInfo
-	ReadyTask        *runReadyTask
+	PendingChat  *runPendingChat
+	UnreadMail   []runUnreadMail
+	CurrentClaim *ClaimInfo
+	ReadyTask    *runReadyTask
+}
+
+type runPendingChat struct {
+	Alias    string
+	Messages []runCommsMessage
+}
+
+type runUnreadMail struct {
+	From    string
+	Subject string
+	Body    string
+}
+
+type runCommsMessage struct {
+	From string
+	Body string
 }
 
 type runReadyTask struct {
@@ -40,6 +54,12 @@ type runReadyTask struct {
 type runDispatchDefaults struct {
 	IdleWaitSeconds int
 }
+
+const (
+	runDispatchChatHistoryLimit = 5
+	runDispatchMailLimit        = 3
+	runDispatchBodyLimit        = 500
+)
 
 type beadhubRunDispatcher struct {
 	cfg        *config.Config
@@ -69,18 +89,29 @@ func (d *beadhubRunDispatcher) Next(ctx context.Context) (runDispatchDecision, e
 func (d *beadhubRunDispatcher) summary(ctx context.Context) (runDispatchSummary, error) {
 	summary := runDispatchSummary{}
 
-	if pendingResp, err := chat.Pending(ctx, d.aw); err == nil && len(pendingResp.Pending) > 0 {
-		summary.PendingChatAlias = pendingResp.Pending[0].LastFrom
+	if pendingResp, err := d.aw.ChatPending(ctx); err == nil && len(pendingResp.Pending) > 0 {
+		item := pendingResp.Pending[0]
+		pendingChat := &runPendingChat{Alias: strings.TrimSpace(item.LastFrom)}
+		if historyResp, err := d.aw.ChatHistory(ctx, aweb.ChatHistoryParams{
+			SessionID: item.SessionID,
+			Limit:     runDispatchChatHistoryLimit,
+		}); err == nil {
+			pendingChat.Messages = buildRunCommsMessages(historyResp.Messages)
+		}
+		if len(pendingChat.Messages) == 0 && strings.TrimSpace(item.LastMessage) != "" {
+			pendingChat.Messages = []runCommsMessage{{
+				From: pendingChat.Alias,
+				Body: item.LastMessage,
+			}}
+		}
+		summary.PendingChat = pendingChat
 	}
 
 	if inboxResp, err := d.aw.Inbox(ctx, aweb.InboxParams{
 		UnreadOnly: true,
-		Limit:      10,
+		Limit:      runDispatchMailLimit,
 	}); err == nil {
-		summary.UnreadMailCount = len(inboxResp.Messages)
-		if len(inboxResp.Messages) > 0 {
-			summary.UnreadMailFrom = inboxResp.Messages[0].FromAlias
-		}
+		summary.UnreadMail = buildRunUnreadMail(inboxResp.Messages)
 	}
 
 	if status, err := fetchStatusWithConfig(d.cfg); err == nil && len(status.YourClaims) > 0 {
@@ -130,18 +161,14 @@ func selectRunDispatch(summary runDispatchSummary, defaults runDispatchDefaults)
 	defaults = withRunDispatchDefaults(defaults)
 
 	switch {
-	case strings.TrimSpace(summary.PendingChatAlias) != "":
+	case summary.PendingChat != nil:
 		return runDispatchDecision{
-			Prompt:      fmt.Sprintf("Respond to chat from %s. Read the unread exchange, reply if needed, and clear the pending conversation before switching focus.", summary.PendingChatAlias),
+			Prompt:      buildPendingChatPrompt(*summary.PendingChat),
 			WaitSeconds: 5,
 		}
-	case summary.UnreadMailCount > 0:
-		prompt := "Check and respond to unread mail. Triage the inbox, reply where needed, and coordinate any blockers."
-		if strings.TrimSpace(summary.UnreadMailFrom) != "" {
-			prompt = fmt.Sprintf("Check unread mail from %s first, then triage the rest of the inbox and reply where needed.", summary.UnreadMailFrom)
-		}
+	case len(summary.UnreadMail) > 0:
 		return runDispatchDecision{
-			Prompt:      prompt,
+			Prompt:      buildUnreadMailPrompt(summary.UnreadMail),
 			WaitSeconds: 5,
 		}
 	case summary.CurrentClaim != nil:
@@ -176,4 +203,80 @@ func buildReadyTaskPrompt(task runReadyTask) string {
 		return fmt.Sprintf("Pick up %s if it is still appropriate, work on it, and before closing the bead run a self-review or code-reviewer pass on your changes.", task.ID)
 	}
 	return fmt.Sprintf("Pick up %s: %s. Claim it if appropriate, work on it, and before closing the bead run a self-review or code-reviewer pass on your changes.", task.ID, title)
+}
+
+func buildRunCommsMessages(messages []aweb.ChatMessage) []runCommsMessage {
+	result := make([]runCommsMessage, 0, len(messages))
+	for _, message := range messages {
+		from := strings.TrimSpace(message.FromAddress)
+		if from == "" {
+			from = strings.TrimSpace(message.FromAgent)
+		}
+		result = append(result, runCommsMessage{
+			From: from,
+			Body: truncateRunDispatchBody(message.Body),
+		})
+	}
+	return result
+}
+
+func buildRunUnreadMail(messages []aweb.InboxMessage) []runUnreadMail {
+	result := make([]runUnreadMail, 0, len(messages))
+	for _, message := range messages {
+		from := strings.TrimSpace(message.FromAddress)
+		if from == "" {
+			from = strings.TrimSpace(message.FromAlias)
+		}
+		result = append(result, runUnreadMail{
+			From:    from,
+			Subject: strings.TrimSpace(message.Subject),
+			Body:    truncateRunDispatchBody(message.Body),
+		})
+	}
+	return result
+}
+
+func buildPendingChatPrompt(pending runPendingChat) string {
+	alias := strings.TrimSpace(pending.Alias)
+	if alias == "" {
+		alias = "the pending conversation"
+	}
+
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("Respond to chat from %s. Here is your current comms status; no need to check again before replying:\n", alias))
+	for _, message := range pending.Messages {
+		from := strings.TrimSpace(message.From)
+		if from == "" {
+			from = "unknown"
+		}
+		builder.WriteString(fmt.Sprintf("- %s: %s\n", from, strings.TrimSpace(message.Body)))
+	}
+	builder.WriteString("Respond as needed, then clear the pending conversation before switching focus.")
+	return builder.String()
+}
+
+func buildUnreadMailPrompt(messages []runUnreadMail) string {
+	var builder strings.Builder
+	builder.WriteString("Here is your current comms status; no need to check again before replying:\n")
+	for _, message := range messages {
+		from := strings.TrimSpace(message.From)
+		if from == "" {
+			from = "unknown"
+		}
+		subject := strings.TrimSpace(message.Subject)
+		if subject == "" {
+			subject = "(no subject)"
+		}
+		builder.WriteString(fmt.Sprintf("- From: %s\n  Subject: %s\n  Body: %s\n", from, subject, strings.TrimSpace(message.Body)))
+	}
+	builder.WriteString("Respond to the unread mail as needed, then continue coordinating work.")
+	return builder.String()
+}
+
+func truncateRunDispatchBody(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) <= runDispatchBodyLimit {
+		return text
+	}
+	return strings.TrimSpace(text[:runDispatchBodyLimit]) + "..."
 }

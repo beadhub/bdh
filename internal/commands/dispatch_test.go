@@ -32,26 +32,38 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 	task := runReadyTask{ID: "bdh-54y", Title: "List active"}
 
 	chatDecision := selectRunDispatch(runDispatchSummary{
-		PendingChatAlias: "grace",
-		UnreadMailCount:  3,
-		CurrentClaim:     &claim,
-		ReadyTask:        &task,
+		PendingChat: &runPendingChat{
+			Alias: "grace",
+			Messages: []runCommsMessage{
+				{From: "grace", Body: "Please validate the latest run behavior."},
+			},
+		},
+		UnreadMail:   []runUnreadMail{{From: "mia", Subject: "triage", Body: "mail body"}},
+		CurrentClaim: &claim,
+		ReadyTask:    &task,
 	}, defaults)
 	if !containsText(chatDecision.Prompt, "Respond to chat from grace") {
 		t.Fatalf("expected chat prompt, got: %q", chatDecision.Prompt)
+	}
+	if !containsText(chatDecision.Prompt, "Please validate the latest run behavior.") {
+		t.Fatalf("expected chat content in prompt, got: %q", chatDecision.Prompt)
 	}
 	if chatDecision.WaitSeconds != 5 {
 		t.Fatalf("expected short wait for chat, got %d", chatDecision.WaitSeconds)
 	}
 
 	mailDecision := selectRunDispatch(runDispatchSummary{
-		UnreadMailCount: 2,
-		UnreadMailFrom:  "mia",
-		CurrentClaim:    &claim,
-		ReadyTask:       &task,
+		UnreadMail: []runUnreadMail{
+			{From: "mia", Subject: "Review", Body: "Can you review the command flow?"},
+		},
+		CurrentClaim: &claim,
+		ReadyTask:    &task,
 	}, defaults)
-	if !containsText(mailDecision.Prompt, "unread mail from mia") {
+	if !containsText(mailDecision.Prompt, "From: mia") {
 		t.Fatalf("expected mail prompt, got: %q", mailDecision.Prompt)
+	}
+	if !containsText(mailDecision.Prompt, "Can you review the command flow?") {
+		t.Fatalf("expected mail body in prompt, got: %q", mailDecision.Prompt)
 	}
 
 	claimDecision := selectRunDispatch(runDispatchSummary{
@@ -76,6 +88,17 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 	}
 	if !idleDecision.Skip {
 		t.Fatalf("expected idle dispatch to skip provider launch")
+	}
+}
+
+func TestTruncateRunDispatchBody(t *testing.T) {
+	long := strings.Repeat("a", runDispatchBodyLimit+20)
+	got := truncateRunDispatchBody(long)
+	if len(got) <= runDispatchBodyLimit {
+		t.Fatalf("expected truncated body with ellipsis, got length %d", len(got))
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected ellipsis suffix, got %q", got)
 	}
 }
 
