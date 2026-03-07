@@ -39,94 +39,55 @@ func init() {
 	listActiveCmd.Flags().BoolVar(&listActiveJSON, "json", false, "Output as JSON")
 }
 
-// ListActiveIssue represents a bead issue for the list-active display.
-type ListActiveIssue struct {
-	BeadID   string `json:"bead_id"`
-	Repo     string `json:"repo"`
-	Branch   string `json:"branch"`
-	Title    string `json:"title"`
-	Status   string `json:"status"`
-	Priority int    `json:"priority"`
-	Type     string `json:"type"`
-	Assignee string `json:"assignee,omitempty"`
-}
-
-// ListActiveResult contains the result of the list-active command.
-type ListActiveResult struct {
-	Issues []ListActiveIssue `json:"issues"`
-}
-
 func runListActive(cmd *cobra.Command, args []string) error {
 	cfg, err := loadAndValidateConfig()
 	if err != nil {
 		return err
 	}
 
-	result, err := fetchListActive(cfg.BeadhubURL)
+	c, err := newBeadHubClientRequired(cfg.BeadhubURL)
 	if err != nil {
 		return err
 	}
 
-	output := formatListActiveOutput(result, listActiveJSON)
-	fmt.Print(output)
-	return nil
-}
-
-func fetchListActive(beadhubURL string) (*ListActiveResult, error) {
-	c, err := newBeadHubClientRequired(beadhubURL)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	ctx, cancel := context.WithTimeout(cmd.Context(), apiTimeout)
 	defer cancel()
 
 	resp, err := c.BeadsIssues(ctx, &client.BeadsIssuesRequest{
 		Status:   "in_progress",
 		Repo:     listActiveRepo,
 		Assignee: listActiveAssignee,
-		Limit:    200,
+		Limit:    maxWorkspaceQueryLimit,
 	})
 	if err != nil {
 		var clientErr *client.Error
 		if errors.As(err, &clientErr) {
-			return nil, formatClientErr(err)
+			return formatClientErr(err)
 		}
-		return nil, fmt.Errorf("failed to fetch active beads: %w", err)
+		return fmt.Errorf("failed to fetch active beads: %w", err)
 	}
 
-	issues := make([]ListActiveIssue, 0, len(resp.Issues))
-	for _, issue := range resp.Issues {
-		issues = append(issues, ListActiveIssue{
-			BeadID:   issue.BeadID,
-			Repo:     issue.Repo,
-			Branch:   issue.Branch,
-			Title:    issue.Title,
-			Status:   issue.Status,
-			Priority: issue.Priority,
-			Type:     issue.Type,
-			Assignee: issue.Assignee,
-		})
-	}
-
-	return &ListActiveResult{Issues: issues}, nil
+	output := formatListActiveOutput(resp, listActiveJSON)
+	fmt.Print(output)
+	return nil
 }
 
-func formatListActiveOutput(result *ListActiveResult, asJSON bool) string {
+func formatListActiveOutput(resp *client.BeadsIssuesResponse, asJSON bool) string {
 	if asJSON {
-		return marshalJSONOrFallback(result)
+		return marshalJSONOrFallback(resp)
 	}
 
-	if len(result.Issues) == 0 {
+	if len(resp.Issues) == 0 {
 		return "No active beads across the project.\n"
 	}
 
 	// Group by repo
 	type repoGroup struct {
 		repo   string
-		issues []ListActiveIssue
+		issues []client.BeadsIssue
 	}
 	repoMap := map[string]*repoGroup{}
-	for _, issue := range result.Issues {
+	for _, issue := range resp.Issues {
 		g, ok := repoMap[issue.Repo]
 		if !ok {
 			g = &repoGroup{repo: issue.Repo}
@@ -143,7 +104,7 @@ func formatListActiveOutput(result *ListActiveResult, asJSON bool) string {
 	sort.Strings(repos)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Active beads across project (%d):\n", len(result.Issues)))
+	sb.WriteString(fmt.Sprintf("Active beads across project (%d):\n", len(resp.Issues)))
 
 	for _, repo := range repos {
 		g := repoMap[repo]
@@ -155,11 +116,15 @@ func formatListActiveOutput(result *ListActiveResult, asJSON bool) string {
 			if issue.Assignee != "" {
 				line += fmt.Sprintf("  (%s)", issue.Assignee)
 			}
-			if issue.Branch != "" && issue.Branch != "main" && issue.Branch != "master" {
+			if issue.Branch != "" && issue.Branch != "main" {
 				line += fmt.Sprintf("  [%s]", issue.Branch)
 			}
 			sb.WriteString(line + "\n")
 		}
+	}
+
+	if resp.HasMore {
+		sb.WriteString(fmt.Sprintf("\n(showing first %d results, more available on the server)\n", len(resp.Issues)))
 	}
 
 	return sb.String()

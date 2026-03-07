@@ -1003,12 +1003,12 @@ func (c *Client) ListLocks(ctx context.Context, req *ListLocksRequest) (*ListLoc
 
 // BeadsIssuesRequest is the request parameters for GET /v1/beads/issues.
 type BeadsIssuesRequest struct {
-	Repo     string `json:"repo,omitempty"`
-	Branch   string `json:"branch,omitempty"`
-	Status   string `json:"status,omitempty"`
-	Assignee string `json:"assignee,omitempty"`
-	Type     string `json:"type,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
+	Repo     string
+	Branch   string
+	Status   string
+	Assignee string
+	Type     string
+	Limit    int
 }
 
 // BeadsIssue represents a single issue in the response.
