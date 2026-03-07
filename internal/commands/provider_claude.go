@@ -26,6 +26,7 @@ func (s runUsageStats) ContextPct() float64 {
 }
 
 type runBuildOptions struct {
+	SessionID       string
 	ContinueSession bool
 	AllowedTools    string
 	Model           string
@@ -123,7 +124,9 @@ func (claudeProvider) BuildCommand(prompt string, opts runBuildOptions) ([]strin
 		"--include-partial-messages",
 	}
 
-	if opts.ContinueSession {
+	if strings.TrimSpace(opts.SessionID) != "" {
+		command = append(command, "--resume", opts.SessionID)
+	} else if opts.ContinueSession {
 		command = append(command, "--continue")
 	}
 	if strings.TrimSpace(opts.AllowedTools) != "" {

@@ -108,6 +108,41 @@ func TestRunLoopUsesContinueWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestRunLoopUsesExactSessionIDAfterFirstRunWhenContinueEnabled(t *testing.T) {
+	provider := claudeProvider{}
+	var commands [][]string
+
+	loop := &runLoop{
+		provider: provider,
+		now:      func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) },
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		out:      io.Discard,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+			commands = append(commands, append([]string(nil), argv...))
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		Prompt:       "continue working",
+		ContinueMode: true,
+		MaxRuns:      2,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(commands) != 2 {
+		t.Fatalf("expected 2 commands, got %d", len(commands))
+	}
+	if !strings.Contains(strings.Join(commands[0], " "), "--continue") {
+		t.Fatalf("first run should use provider continue mode, got: %q", strings.Join(commands[0], " "))
+	}
+	if !strings.Contains(strings.Join(commands[1], " "), "--resume sess-42") {
+		t.Fatalf("second run should resume exact captured session id, got: %q", strings.Join(commands[1], " "))
+	}
+}
+
 func TestRunLoopFormatsOutput(t *testing.T) {
 	var output strings.Builder
 

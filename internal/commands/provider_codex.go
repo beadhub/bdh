@@ -41,7 +41,9 @@ func (codexProvider) BuildCommand(prompt string, opts runBuildOptions) ([]string
 		"codex",
 		"exec",
 	}
-	if opts.ContinueSession {
+	if strings.TrimSpace(opts.SessionID) != "" {
+		command = append(command, "resume", opts.SessionID)
+	} else if opts.ContinueSession {
 		command = append(command, "resume", "--last")
 	}
 	command = append(command, "--json")

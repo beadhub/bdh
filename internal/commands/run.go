@@ -364,7 +364,11 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 		Model:        opts.Model,
 	}
 	if opts.ContinueMode {
-		buildOpts.ContinueSession = true
+		if strings.TrimSpace(state.SessionID) != "" {
+			buildOpts.SessionID = state.SessionID
+		} else {
+			buildOpts.ContinueSession = true
+		}
 	}
 
 	argv, err := l.provider.BuildCommand(prompt, buildOpts)

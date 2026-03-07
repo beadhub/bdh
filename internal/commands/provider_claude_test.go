@@ -47,6 +47,25 @@ func TestClaudeProviderBuildCommandWithContinue(t *testing.T) {
 	}
 }
 
+func TestClaudeProviderBuildCommandWithSessionID(t *testing.T) {
+	provider := claudeProvider{}
+
+	command, err := provider.BuildCommand("fix the bug", runBuildOptions{
+		SessionID: "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("BuildCommand returned error: %v", err)
+	}
+
+	joined := joinArgs(command)
+	if !containsText(joined, "--resume sess-1") {
+		t.Fatalf("expected explicit resume flag, got: %q", joined)
+	}
+	if containsText(joined, "--continue") {
+		t.Fatalf("did not expect continue flag when session id is set, got: %q", joined)
+	}
+}
+
 func TestClaudeProviderParseOutput(t *testing.T) {
 	provider := claudeProvider{}
 
