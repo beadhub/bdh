@@ -771,25 +771,25 @@ func TestApplyControlEvent_BufferUpdatedRendersInputPrompt(t *testing.T) {
 	if state.InputBuffer != "/wait" {
 		t.Fatalf("expected input buffer to update, got %q", state.InputBuffer)
 	}
-	if !containsText(output.String(), "input> /wait") {
+	if !containsText(output.String(), defaultRunInputPromptLabel+"/wait") {
 		t.Fatalf("expected rendered input prompt, got %q", output.String())
 	}
 }
 
 func TestApplyControlEvent_BufferUpdatedRendersInputPromptOnScreen(t *testing.T) {
-	screen := &runScreenManager{}
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
 	loop := &runLoop{screen: screen}
 	state := &runState{Paused: true}
 
 	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: "/wait"}, state, false, nil)
 
-	if screen.inputLine != "input> /wait" {
+	if screen.inputLine != defaultRunInputPromptLabel+"/wait" {
 		t.Fatalf("expected screen input line, got %q", screen.inputLine)
 	}
 }
 
 func TestApplyControlEvent_BufferUpdatedPreservesLeadingSpace(t *testing.T) {
-	screen := &runScreenManager{}
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
 	loop := &runLoop{screen: screen}
 	state := &runState{Paused: true}
 
@@ -798,7 +798,7 @@ func TestApplyControlEvent_BufferUpdatedPreservesLeadingSpace(t *testing.T) {
 	if !state.PendingInput {
 		t.Fatal("expected leading-space input to remain pending")
 	}
-	if screen.inputLine != "input>  leading" {
+	if screen.inputLine != defaultRunInputPromptLabel+" leading" {
 		t.Fatalf("expected screen input line to preserve leading space, got %q", screen.inputLine)
 	}
 }
@@ -821,7 +821,7 @@ func TestShouldSuppressText_PromptEcho(t *testing.T) {
 }
 
 func TestRenderIdleLineUsesStatusAreaOnScreen(t *testing.T) {
-	screen := &runScreenManager{}
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
 	loop := &runLoop{screen: screen}
 	state := &runState{
 		PendingInput: true,
@@ -833,7 +833,7 @@ func TestRenderIdleLineUsesStatusAreaOnScreen(t *testing.T) {
 	if screen.statusLine != "next run in 12s" {
 		t.Fatalf("expected status line to hold countdown, got %q", screen.statusLine)
 	}
-	if screen.inputLine != "input> /resume soon" {
+	if screen.inputLine != defaultRunInputPromptLabel+"/resume soon" {
 		t.Fatalf("expected input line to remain separate, got %q", screen.inputLine)
 	}
 }

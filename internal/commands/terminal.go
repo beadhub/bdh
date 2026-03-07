@@ -4,6 +4,8 @@ import "strings"
 
 type runControlEventType string
 
+const defaultRunInputPromptLabel = "input> "
+
 const (
 	runControlTypingStarted runControlEventType = "typing_started"
 	runControlBufferUpdated runControlEventType = "buffer_updated"
@@ -42,16 +44,30 @@ func parseRunControlSubmission(text string) runControlEvent {
 	}
 }
 
-func runInputValueFromLine(line string) string {
+func formatRunInputLine(promptLabel string, value string) string {
+	if strings.TrimSpace(promptLabel) == "" {
+		promptLabel = defaultRunInputPromptLabel
+	}
+	if value == "" {
+		return promptLabel
+	}
+	return promptLabel + value
+}
+
+func runInputValueFromLine(line string, promptLabel string) string {
 	line = strings.TrimLeft(line, " \t")
-	if line == "" || line == "input>" {
+	if strings.TrimSpace(promptLabel) == "" {
+		promptLabel = defaultRunInputPromptLabel
+	}
+	trimmedPrompt := strings.TrimSpace(promptLabel)
+	if line == "" || line == trimmedPrompt {
 		return ""
 	}
-	if strings.HasPrefix(line, "input> ") {
-		return strings.TrimPrefix(line, "input> ")
+	if strings.HasPrefix(line, promptLabel) {
+		return strings.TrimPrefix(line, promptLabel)
 	}
-	if strings.HasPrefix(line, "input>") {
-		return strings.TrimPrefix(line, "input>")
+	if strings.HasPrefix(line, trimmedPrompt) {
+		return strings.TrimPrefix(line, trimmedPrompt)
 	}
 	return line
 }

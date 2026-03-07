@@ -15,8 +15,9 @@ import (
 )
 
 type runScreenManager struct {
-	inputFile  *os.File
-	outputFile *os.File
+	inputFile   *os.File
+	outputFile  *os.File
+	promptLabel string
 
 	mu         sync.Mutex
 	lines      []string
@@ -32,10 +33,11 @@ type runScreenManager struct {
 }
 
 type runScreenSnapshot struct {
-	Lines      []string
-	Current    string
-	StatusLine string
-	InputLine  string
+	Lines       []string
+	Current     string
+	StatusLine  string
+	InputLine   string
+	PromptLabel string
 }
 
 type runScreenAppendTextMsg string
@@ -44,10 +46,11 @@ type runScreenSetInputMsg string
 type runScreenQuitMsg struct{}
 
 type runScreenModel struct {
-	viewport viewport.Model
-	input    textinput.Model
-	width    int
-	height   int
+	viewport    viewport.Model
+	input       textinput.Model
+	width       int
+	height      int
+	promptLabel string
 
 	lines      []string
 	current    string
@@ -81,10 +84,11 @@ func newRunScreenManager(in io.Reader, out io.Writer) *runScreenManager {
 	}
 
 	return &runScreenManager{
-		inputFile:  inputFile,
-		outputFile: outputFile,
-		events:     make(chan runControlEvent, 64),
-		inputLine:  "input> ",
+		inputFile:   inputFile,
+		outputFile:  outputFile,
+		promptLabel: defaultRunInputPromptLabel,
+		events:      make(chan runControlEvent, 64),
+		inputLine:   defaultRunInputPromptLabel,
 	}
 }
 
@@ -193,15 +197,11 @@ func (s *runScreenManager) SetInputLine(line string) {
 		return
 	}
 
-	value := runInputValueFromLine(line)
+	value := runInputValueFromLine(line, s.promptLabel)
 
 	s.mu.Lock()
 	s.pending = value != ""
-	if value == "" {
-		s.inputLine = "input> "
-	} else {
-		s.inputLine = "input> " + value
-	}
+	s.inputLine = formatRunInputLine(s.promptLabel, value)
 	program := s.program
 	s.mu.Unlock()
 
@@ -230,17 +230,18 @@ func (s *runScreenManager) ClearStatusLine() {
 }
 
 func (s *runScreenManager) ClearInputLine() {
-	s.SetInputLine("input> ")
+	s.SetInputLine(s.promptLabel)
 }
 
 func (s *runScreenManager) snapshotLocked() runScreenSnapshot {
 	lines := make([]string, len(s.lines))
 	copy(lines, s.lines)
 	return runScreenSnapshot{
-		Lines:      lines,
-		Current:    s.current,
-		StatusLine: s.statusLine,
-		InputLine:  s.inputLine,
+		Lines:       lines,
+		Current:     s.current,
+		StatusLine:  s.statusLine,
+		InputLine:   s.inputLine,
+		PromptLabel: s.promptLabel,
 	}
 }
 
@@ -255,11 +256,7 @@ func (s *runScreenManager) handleInputChanged(value string) {
 	s.mu.Lock()
 	wasPending := s.pending
 	s.pending = value != ""
-	if value == "" {
-		s.inputLine = "input> "
-	} else {
-		s.inputLine = "input> " + value
-	}
+	s.inputLine = formatRunInputLine(s.promptLabel, value)
 	s.mu.Unlock()
 
 	if !wasPending && value != "" {
@@ -271,7 +268,7 @@ func (s *runScreenManager) handleInputChanged(value string) {
 func (s *runScreenManager) handleInputSubmitted(value string) {
 	s.mu.Lock()
 	s.pending = false
-	s.inputLine = "input> "
+	s.inputLine = s.promptLabel
 	s.mu.Unlock()
 
 	s.emit(runControlEvent{Type: runControlBufferUpdated, Text: ""})
@@ -292,14 +289,15 @@ func newRunScreenModel(
 	onStop func(),
 ) runScreenModel {
 	input := textinput.New()
-	input.Prompt = "input> "
-	input.SetValue(runInputValueFromLine(snapshot.InputLine))
+	input.Prompt = snapshot.PromptLabel
+	input.SetValue(runInputValueFromLine(snapshot.InputLine, snapshot.PromptLabel))
 	input.Focus()
 	input.CharLimit = 0
 
 	model := runScreenModel{
 		viewport:       viewport.New(0, 0),
 		input:          input,
+		promptLabel:    snapshot.PromptLabel,
 		lines:          snapshot.Lines,
 		current:        snapshot.Current,
 		statusLine:     snapshot.StatusLine,

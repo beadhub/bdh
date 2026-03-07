@@ -21,16 +21,17 @@ type runCommandRunner func(ctx context.Context, dir string, argv []string, onLin
 type runSleepFunc func(ctx context.Context, d time.Duration) error
 
 type runLoop struct {
-	provider runProvider
-	runner   runCommandRunner
-	sleep    runSleepFunc
-	now      func() time.Time
-	out      io.Writer
-	control  runInputController
-	dispatch runDispatcher
-	defaults runDispatchDefaults
-	screen   *runScreenManager
-	writeMu  sync.Mutex
+	provider         runProvider
+	runner           runCommandRunner
+	sleep            runSleepFunc
+	now              func() time.Time
+	out              io.Writer
+	control          runInputController
+	dispatch         runDispatcher
+	defaults         runDispatchDefaults
+	screen           *runScreenManager
+	inputPromptLabel string
+	writeMu          sync.Mutex
 }
 
 type runLoopOptions struct {
@@ -130,8 +131,10 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		}
 
 		var dispatcher runDispatcher
+		inputPromptLabel := defaultRunInputPromptLabel
 		cfg, cfgErr := loadAndValidateConfig()
 		if cfgErr == nil {
+			inputPromptLabel = runIdentityPromptLabel(cfg.ProjectSlug, cfg.Alias)
 			if aw, awErr := newAwebClientRequired(cfg.BeadhubURL); awErr == nil {
 				dispatcher = newBeadhubRunDispatcher(cfg, aw, dispatchDefaults)
 			}
@@ -141,17 +144,22 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 		defer stop()
 
 		screen := newRunScreenManager(cmd.InOrStdin(), cmd.OutOrStdout())
+		if screen != nil {
+			screen.promptLabel = inputPromptLabel
+			screen.inputLine = inputPromptLabel
+		}
 
 		loop := &runLoop{
-			provider: provider,
-			runner:   realRunCommand,
-			sleep:    sleepWithContext,
-			now:      time.Now,
-			out:      cmd.OutOrStdout(),
-			control:  screen,
-			dispatch: dispatcher,
-			defaults: dispatchDefaults,
-			screen:   screen,
+			provider:         provider,
+			runner:           realRunCommand,
+			sleep:            sleepWithContext,
+			now:              time.Now,
+			out:              cmd.OutOrStdout(),
+			control:          screen,
+			dispatch:         dispatcher,
+			defaults:         dispatchDefaults,
+			screen:           screen,
+			inputPromptLabel: inputPromptLabel,
 		}
 
 		opts := runLoopOptions{
@@ -681,14 +689,14 @@ func (l *runLoop) renderInputPrompt(state *runState) {
 	}
 	if !state.PendingInput && !state.Paused && state.InputBuffer == "" {
 		if l.screen != nil {
-			l.screen.SetInputLine("input> ")
+			l.screen.SetInputLine(l.promptLabel())
 		}
 		return
 	}
 
-	prompt := "input> " + state.InputBuffer
+	prompt := formatRunInputLine(l.promptLabel(), state.InputBuffer)
 	if state.Paused && state.InputBuffer == "" {
-		prompt = "input> "
+		prompt = l.promptLabel()
 	}
 
 	if l.screen != nil {
@@ -699,6 +707,22 @@ func (l *runLoop) renderInputPrompt(state *runState) {
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
 	fmt.Fprintf(l.out, "\r\033[K%s", prompt)
+}
+
+func (l *runLoop) promptLabel() string {
+	if strings.TrimSpace(l.inputPromptLabel) == "" {
+		return defaultRunInputPromptLabel
+	}
+	return l.inputPromptLabel
+}
+
+func runIdentityPromptLabel(projectSlug string, alias string) string {
+	projectSlug = strings.TrimSpace(projectSlug)
+	alias = strings.TrimSpace(alias)
+	if projectSlug == "" || alias == "" {
+		return defaultRunInputPromptLabel
+	}
+	return projectSlug + ":" + alias + "> "
 }
 
 func (l *runLoop) renderIdleLine(label string, remaining int, state *runState) {
