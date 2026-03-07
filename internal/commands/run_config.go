@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/beadhub/bdh/internal/config"
 )
 
 const (
@@ -32,10 +34,46 @@ type runResolvedSettings struct {
 }
 
 func loadRunUserConfig() (runUserConfig, error) {
-	path, err := runUserConfigPath()
+	globalPath, err := runUserConfigPath()
 	if err != nil {
 		return runUserConfig{}, err
 	}
+	cfg, err := loadRunUserConfigFile(globalPath)
+	if err != nil {
+		return runUserConfig{}, err
+	}
+
+	localPath, err := runLocalUserConfigPath()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return runUserConfig{}, err
+	}
+	localCfg, err := loadRunUserConfigFile(localPath)
+	if err != nil {
+		return runUserConfig{}, err
+	}
+	return mergeRunUserConfig(cfg, localCfg), nil
+}
+
+func runUserConfigPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory for run config: %w", err)
+	}
+	return filepath.Join(homeDir, ".config", "beadhub", "run.json"), nil
+}
+
+func runLocalUserConfigPath() (string, error) {
+	root, err := config.WorkspaceRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ".beadhub-run.json"), nil
+}
+
+func loadRunUserConfigFile(path string) (runUserConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -51,12 +89,24 @@ func loadRunUserConfig() (runUserConfig, error) {
 	return cfg, nil
 }
 
-func runUserConfigPath() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home directory for run config: %w", err)
+func mergeRunUserConfig(base runUserConfig, override runUserConfig) runUserConfig {
+	merged := base
+	if override.BasePrompt != nil {
+		merged.BasePrompt = override.BasePrompt
 	}
-	return filepath.Join(homeDir, ".config", "beadhub", "run.json"), nil
+	if override.WorkPromptSuffix != nil {
+		merged.WorkPromptSuffix = override.WorkPromptSuffix
+	}
+	if override.CommsPromptSuffix != nil {
+		merged.CommsPromptSuffix = override.CommsPromptSuffix
+	}
+	if override.WaitSeconds != nil {
+		merged.WaitSeconds = override.WaitSeconds
+	}
+	if override.IdleWaitSeconds != nil {
+		merged.IdleWaitSeconds = override.IdleWaitSeconds
+	}
+	return merged
 }
 
 func resolveRunSettings(
