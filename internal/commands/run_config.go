@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/beadhub/bdh/internal/config"
 )
 
 const (
@@ -16,11 +19,12 @@ const (
 )
 
 type runUserConfig struct {
-	BasePrompt        *string `json:"base_prompt"`
-	WorkPromptSuffix  *string `json:"work_prompt_suffix"`
-	CommsPromptSuffix *string `json:"comms_prompt_suffix"`
-	WaitSeconds       *int    `json:"wait_seconds"`
-	IdleWaitSeconds   *int    `json:"idle_wait_seconds"`
+	BasePrompt        *string            `json:"base_prompt"`
+	WorkPromptSuffix  *string            `json:"work_prompt_suffix"`
+	CommsPromptSuffix *string            `json:"comms_prompt_suffix"`
+	WaitSeconds       *int               `json:"wait_seconds"`
+	IdleWaitSeconds   *int               `json:"idle_wait_seconds"`
+	Services          []runServiceConfig `json:"services"`
 }
 
 type runResolvedSettings struct {
@@ -29,13 +33,50 @@ type runResolvedSettings struct {
 	CommsPromptSuffix string
 	WaitSeconds       int
 	IdleWaitSeconds   int
+	Services          []runServiceConfig
 }
 
 func loadRunUserConfig() (runUserConfig, error) {
-	path, err := runUserConfigPath()
+	globalPath, err := runUserConfigPath()
 	if err != nil {
 		return runUserConfig{}, err
 	}
+	cfg, err := loadRunUserConfigFile(globalPath)
+	if err != nil {
+		return runUserConfig{}, err
+	}
+
+	localPath, err := runLocalUserConfigPath()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return runUserConfig{}, err
+	}
+	localCfg, err := loadRunUserConfigFile(localPath)
+	if err != nil {
+		return runUserConfig{}, err
+	}
+	return mergeRunUserConfig(cfg, localCfg), nil
+}
+
+func runUserConfigPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory for run config: %w", err)
+	}
+	return filepath.Join(homeDir, ".config", "beadhub", "run.json"), nil
+}
+
+func runLocalUserConfigPath() (string, error) {
+	root, err := config.WorkspaceRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ".beadhub-run.json"), nil
+}
+
+func loadRunUserConfigFile(path string) (runUserConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -51,12 +92,27 @@ func loadRunUserConfig() (runUserConfig, error) {
 	return cfg, nil
 }
 
-func runUserConfigPath() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home directory for run config: %w", err)
+func mergeRunUserConfig(base runUserConfig, override runUserConfig) runUserConfig {
+	merged := base
+	if override.BasePrompt != nil {
+		merged.BasePrompt = override.BasePrompt
 	}
-	return filepath.Join(homeDir, ".config", "beadhub", "run.json"), nil
+	if override.WorkPromptSuffix != nil {
+		merged.WorkPromptSuffix = override.WorkPromptSuffix
+	}
+	if override.CommsPromptSuffix != nil {
+		merged.CommsPromptSuffix = override.CommsPromptSuffix
+	}
+	if override.WaitSeconds != nil {
+		merged.WaitSeconds = override.WaitSeconds
+	}
+	if override.IdleWaitSeconds != nil {
+		merged.IdleWaitSeconds = override.IdleWaitSeconds
+	}
+	if override.Services != nil {
+		merged.Services = append([]runServiceConfig(nil), override.Services...)
+	}
+	return merged
 }
 
 func resolveRunSettings(
@@ -95,6 +151,9 @@ func resolveRunSettings(
 	if cfg.IdleWaitSeconds != nil {
 		settings.IdleWaitSeconds = *cfg.IdleWaitSeconds
 	}
+	if cfg.Services != nil {
+		settings.Services = append([]runServiceConfig(nil), cfg.Services...)
+	}
 	if basePromptFlagSet {
 		settings.BasePrompt = basePromptFlagValue
 	}
@@ -116,6 +175,14 @@ func resolveRunSettings(
 	}
 	if settings.IdleWaitSeconds < 0 {
 		return runResolvedSettings{}, fmt.Errorf("idle_wait_seconds must be >= 0")
+	}
+	for _, service := range settings.Services {
+		if strings.TrimSpace(service.Name) == "" {
+			return runResolvedSettings{}, fmt.Errorf("services.name must be non-empty")
+		}
+		if strings.TrimSpace(service.Command) == "" {
+			return runResolvedSettings{}, fmt.Errorf("services[%s].command must be non-empty", service.Name)
+		}
 	}
 
 	return settings, nil

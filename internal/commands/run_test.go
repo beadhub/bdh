@@ -216,6 +216,20 @@ func TestComposeRunPromptWithoutBaseUsesCycleOnly(t *testing.T) {
 	}
 }
 
+func TestComposeRunPromptWithServicesAddsSection(t *testing.T) {
+	got := composeRunPromptWithServices(
+		"chat with grace and coordinate",
+		"Respond to unread chat from grace.",
+		[]runServiceConfig{
+			{Name: "backend", Description: "Backend API server on http://localhost:8000"},
+			{Name: "frontend", Command: "make run-frontend"},
+		},
+	)
+	if !strings.Contains(got, "Services available:\n- backend: Backend API server on http://localhost:8000\n- frontend: make run-frontend") {
+		t.Fatalf("expected services section, got %q", got)
+	}
+}
+
 func TestRunLoopInitialPromptAppliesOnlyToFirstRun(t *testing.T) {
 	provider := claudeProvider{}
 	var commands [][]string
@@ -772,6 +786,84 @@ func TestRunLoopPromptOverrideForcesRunWhenDispatchWouldSkip(t *testing.T) {
 	}
 }
 
+func TestRunLoopPromptOverrideBypassesDispatchCyclePrompt(t *testing.T) {
+	controller := newFakeRunInputController()
+	firstRunStarted := make(chan struct{})
+	releaseFirstRun := make(chan struct{})
+	var commands [][]string
+	var mu sync.Mutex
+	runCount := 0
+
+	dispatcher := &fakeRunDispatcher{
+		decisions: []runDispatchDecision{
+			{Prompt: "claimed work", WaitSeconds: 5},
+			{Prompt: "Pick up beadhub-018 and work on it.", WaitSeconds: 5},
+		},
+	}
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      io.Discard,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		control:  controller,
+		dispatch: dispatcher,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+			mu.Lock()
+			runCount++
+			currentRun := runCount
+			commands = append(commands, append([]string(nil), argv...))
+			mu.Unlock()
+
+			if currentRun == 1 {
+				close(firstRunStarted)
+				<-releaseFirstRun
+			}
+
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- loop.Run(context.Background(), runLoopOptions{
+			Prompt:      "persistent mission",
+			WaitSeconds: 0,
+			MaxRuns:     2,
+		})
+	}()
+
+	select {
+	case <-firstRunStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for first run")
+	}
+
+	controller.send(runControlEvent{Type: runControlPrompt, Text: "are we ready to release"})
+	close(releaseFirstRun)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("timed out waiting for loop to finish")
+	}
+
+	if len(commands) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(commands))
+	}
+	second := joinArgs(commands[1])
+	if !containsText(second, "are we ready to release") {
+		t.Fatalf("expected queued user prompt on second run, got %q", second)
+	}
+	if containsText(second, "Pick up beadhub-018 and work on it.") {
+		t.Fatalf("expected queued user prompt to bypass dispatch cycle prompt, got %q", second)
+	}
+}
+
 func TestRunLoopInitialPromptForcesRunWhenDispatchWouldSkip(t *testing.T) {
 	dispatcher := &fakeRunDispatcher{
 		decisions: []runDispatchDecision{
@@ -806,6 +898,47 @@ func TestRunLoopInitialPromptForcesRunWhenDispatchWouldSkip(t *testing.T) {
 	}
 	if !containsText(joinArgs(commands[0]), "are we ready to release") {
 		t.Fatalf("expected initial prompt in forced run, got %q", joinArgs(commands[0]))
+	}
+}
+
+func TestRunLoopInitialPromptBypassesDispatchCyclePrompt(t *testing.T) {
+	dispatcher := &fakeRunDispatcher{
+		decisions: []runDispatchDecision{
+			{Prompt: "Pick up beadhub-018 and work on it.", WaitSeconds: 30},
+		},
+	}
+	var commands [][]string
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      io.Discard,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		dispatch: dispatcher,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+			commands = append(commands, append([]string(nil), argv...))
+			onLine(`{"type":"result","duration_ms":1000}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		InitialPrompt: "are we ready to release",
+		WaitSeconds:   0,
+		MaxRuns:       1,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("expected initial prompt to force one run, got %d runs", len(commands))
+	}
+	first := joinArgs(commands[0])
+	if !containsText(first, "are we ready to release") {
+		t.Fatalf("expected initial prompt in forced run, got %q", first)
+	}
+	if containsText(first, "Pick up beadhub-018 and work on it.") {
+		t.Fatalf("expected initial prompt to bypass dispatch cycle prompt, got %q", first)
 	}
 }
 

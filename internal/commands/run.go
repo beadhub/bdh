@@ -21,17 +21,18 @@ type runCommandRunner func(ctx context.Context, dir string, argv []string, onLin
 type runSleepFunc func(ctx context.Context, d time.Duration) error
 
 type runLoop struct {
-	provider         runProvider
-	runner           runCommandRunner
-	sleep            runSleepFunc
-	now              func() time.Time
-	out              io.Writer
-	control          runInputController
-	dispatch         runDispatcher
-	defaults         runDispatchDefaults
-	screen           *runScreenManager
-	inputPromptLabel string
-	writeMu          sync.Mutex
+	provider          runProvider
+	runner            runCommandRunner
+	sleep             runSleepFunc
+	serviceSupervisor runServiceSupervisor
+	now               func() time.Time
+	out               io.Writer
+	control           runInputController
+	dispatch          runDispatcher
+	defaults          runDispatchDefaults
+	screen            *runScreenManager
+	inputPromptLabel  string
+	writeMu           sync.Mutex
 }
 
 type runLoopOptions struct {
@@ -43,6 +44,7 @@ type runLoopOptions struct {
 	WorkingDir    string
 	AllowedTools  string
 	Model         string
+	Services      []runServiceConfig
 }
 
 type runCycleDecision struct {
@@ -178,6 +180,7 @@ Future provider work will add non-Claude backends on top of the same loop.`,
 			WorkingDir:    runWorkingDir,
 			AllowedTools:  runAllowedTools,
 			Model:         runModel,
+			Services:      settings.Services,
 		}
 
 		err = loop.Run(ctx, opts)
@@ -227,6 +230,16 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 	}
 
 	state := &runState{}
+	serviceSupervisor := l.serviceSupervisor
+	if serviceSupervisor == nil && len(opts.Services) > 0 {
+		serviceSupervisor = newRunServiceManager(l.println)
+	}
+	if serviceSupervisor != nil && len(opts.Services) > 0 {
+		if err := serviceSupervisor.Start(ctx, opts.Services, opts.WorkingDir); err != nil {
+			return err
+		}
+		defer func() { _ = serviceSupervisor.Stop() }()
+	}
 
 	for {
 		decision, err := l.nextPrompt(ctx, opts, state)
@@ -245,7 +258,7 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 
 		baseMissionPrompt := strings.TrimSpace(opts.Prompt)
 		missionPrompt := resolveRunMissionPrompt(baseMissionPrompt, decision.MissionPrompt)
-		prompt := composeRunPrompt(missionPrompt, decision.Prompt)
+		prompt := composeRunPromptWithServices(missionPrompt, decision.Prompt, opts.Services)
 		displayPrompt := runDisplayPrompt(missionPrompt, decision.Prompt)
 		if strings.TrimSpace(prompt) == "" {
 			if l.dispatch == nil && state.Run > 0 && strings.TrimSpace(opts.Prompt) == "" && strings.TrimSpace(opts.InitialPrompt) != "" {
@@ -285,30 +298,24 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 	if explicitMissionPrompt == "" && state.Run == 0 {
 		explicitMissionPrompt = strings.TrimSpace(opts.InitialPrompt)
 	}
+	if explicitMissionPrompt != "" {
+		return runCycleDecision{
+			MissionPrompt: explicitMissionPrompt,
+			WaitSeconds:   opts.WaitSeconds,
+		}, nil
+	}
 	if l.dispatch != nil {
 		decision, err := l.dispatch.Next(ctx)
 		if err != nil {
 			l.printf("info: dispatch failed: %v\n", err)
-			if explicitMissionPrompt != "" {
-				l.println("info: using queued prompt while dispatch recovers.")
-				return runCycleDecision{
-					MissionPrompt: explicitMissionPrompt,
-					WaitSeconds:   opts.WaitSeconds,
-				}, nil
-			}
 			defaults := withRunDispatchDefaults(l.defaults)
 			l.println("info: waiting for dispatch recovery before starting a run.")
 			return runCycleDecision{WaitSeconds: defaults.IdleWaitSeconds, Skip: true}, nil
 		}
 		cycle := runCycleDecision{
-			MissionPrompt: explicitMissionPrompt,
 			Prompt:        decision.Prompt,
 			WaitSeconds:   decision.WaitSeconds,
 			Skip:          decision.Skip,
-		}
-		if explicitMissionPrompt != "" && cycle.Skip {
-			cycle.Skip = false
-			cycle.WaitSeconds = opts.WaitSeconds
 		}
 		return cycle, nil
 	}
@@ -825,6 +832,18 @@ func composeRunPrompt(missionPrompt string, cyclePrompt string) string {
 		return missionPrompt
 	}
 	return fmt.Sprintf("Primary mission:\n%s\n\nCurrent cycle:\n%s", missionPrompt, cyclePrompt)
+}
+
+func composeRunPromptWithServices(missionPrompt string, cyclePrompt string, services []runServiceConfig) string {
+	base := composeRunPrompt(missionPrompt, cyclePrompt)
+	servicesSection := formatRunServicesPromptSection(services)
+	if servicesSection == "" {
+		return base
+	}
+	if strings.TrimSpace(base) == "" {
+		return servicesSection
+	}
+	return fmt.Sprintf("%s\n\n%s", base, servicesSection)
 }
 
 func runDisplayPrompt(missionPrompt string, cyclePrompt string) string {
