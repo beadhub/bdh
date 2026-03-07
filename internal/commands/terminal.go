@@ -13,6 +13,7 @@ type runControlEventType string
 
 const (
 	runControlTypingStarted runControlEventType = "typing_started"
+	runControlBufferUpdated runControlEventType = "buffer_updated"
 	runControlPrompt        runControlEventType = "prompt"
 	runControlStop          runControlEventType = "stop"
 	runControlWait          runControlEventType = "wait"
@@ -146,6 +147,7 @@ func (t *terminalRunInput) readLoop() {
 			text := strings.TrimSpace(string(buffer))
 			buffer = buffer[:0]
 			t.setPending(false)
+			t.emit(runControlEvent{Type: runControlBufferUpdated, Text: ""})
 			if text == "" {
 				continue
 			}
@@ -164,6 +166,7 @@ func (t *terminalRunInput) readLoop() {
 				buffer = buffer[:len(buffer)-1]
 			}
 			t.setPending(len(buffer) > 0)
+			t.emit(runControlEvent{Type: runControlBufferUpdated, Text: string(buffer)})
 		default:
 			if b < 32 || b == 255 {
 				continue
@@ -173,6 +176,7 @@ func (t *terminalRunInput) readLoop() {
 				t.emit(runControlEvent{Type: runControlTypingStarted})
 			}
 			buffer = append(buffer, b)
+			t.emit(runControlEvent{Type: runControlBufferUpdated, Text: string(buffer)})
 		}
 	}
 }
