@@ -39,7 +39,7 @@ func (f *fakeRunInputController) setPending(pending bool) {
 	f.pending = pending
 }
 
-func TestRunLoopStartsFreshWithoutContinueMode(t *testing.T) {
+func TestRunLoopStartsFreshThenKeepsExactSessionWithoutContinueMode(t *testing.T) {
 	provider := claudeProvider{}
 	var commands [][]string
 
@@ -68,8 +68,11 @@ func TestRunLoopStartsFreshWithoutContinueMode(t *testing.T) {
 	if strings.Contains(strings.Join(commands[0], " "), "--continue") {
 		t.Fatalf("first run should start fresh: %q", strings.Join(commands[0], " "))
 	}
-	if strings.Contains(strings.Join(commands[1], " "), "--continue") {
-		t.Fatalf("second run should also start fresh without continue mode: %q", strings.Join(commands[1], " "))
+	if strings.Contains(strings.Join(commands[0], " "), "--resume") {
+		t.Fatalf("first run should not resume an existing session: %q", strings.Join(commands[0], " "))
+	}
+	if !strings.Contains(strings.Join(commands[1], " "), "--resume sess-42") {
+		t.Fatalf("second run should resume exact captured session even without --continue: %q", strings.Join(commands[1], " "))
 	}
 }
 
@@ -104,7 +107,7 @@ func TestRunLoopUsesContinueWhenEnabled(t *testing.T) {
 		t.Fatalf("first run should continue the most recent provider session: %q", strings.Join(commands[0], " "))
 	}
 	if !strings.Contains(strings.Join(commands[1], " "), "--continue") {
-		t.Fatalf("second run should continue the provider session as well: %q", strings.Join(commands[1], " "))
+		t.Fatalf("second run should continue the provider session when no exact session id was captured: %q", strings.Join(commands[1], " "))
 	}
 }
 

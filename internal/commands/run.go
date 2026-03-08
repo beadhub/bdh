@@ -364,12 +364,10 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 		AllowedTools: opts.AllowedTools,
 		Model:        opts.Model,
 	}
-	if opts.ContinueMode {
-		if strings.TrimSpace(state.SessionID) != "" {
-			buildOpts.SessionID = state.SessionID
-		} else {
-			buildOpts.ContinueSession = true
-		}
+	if strings.TrimSpace(state.SessionID) != "" {
+		buildOpts.SessionID = state.SessionID
+	} else if opts.ContinueMode {
+		buildOpts.ContinueSession = true
 	}
 
 	argv, err := l.provider.BuildCommand(prompt, buildOpts)
@@ -378,6 +376,7 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	}
 
 	l.printf("\n%s  %s  >  %s\n\n", header, l.now().Format("15:04:05"), truncateRunText(displayPrompt, 80))
+	l.println(formatRunProviderMode(l.provider, buildOpts))
 	l.println("type /wait, /stop, /quit, or start typing to queue a prompt.")
 	l.clearStatusLine()
 	l.renderInputPrompt(state)
@@ -399,7 +398,7 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	for {
 		select {
 		case err := <-errCh:
-			l.drainPendingControlEvents(state)
+			l.drainPendingControlEvents(state, true)
 			state.RanOnce = true
 			if state.RunInterrupted {
 				state.Paused = true
@@ -437,11 +436,11 @@ func (l *runLoop) maybeAutoCompact(ctx context.Context, opts runLoopOptions, sta
 	return true, nil
 }
 
-func (l *runLoop) drainPendingControlEvents(state *runState) {
+func (l *runLoop) drainPendingControlEvents(state *runState, activeRun bool) {
 	for {
 		select {
 		case event := <-l.controlEvents():
-			l.applyControlEvent(event, state, false, nil)
+			l.applyControlEvent(event, state, activeRun, nil)
 		default:
 			return
 		}
@@ -935,6 +934,20 @@ func (l *runLoop) clearStatusLine() {
 	if l.screen != nil {
 		l.screen.ClearStatusLine()
 	}
+}
+
+func formatRunProviderMode(provider runProvider, opts runBuildOptions) string {
+	name := "provider"
+	if provider != nil && strings.TrimSpace(provider.Name()) != "" {
+		name = provider.Name()
+	}
+	if strings.TrimSpace(opts.SessionID) != "" {
+		return fmt.Sprintf("info: provider %s mode=resume session=%s", name, truncateRunText(opts.SessionID, 24))
+	}
+	if opts.ContinueSession {
+		return fmt.Sprintf("info: provider %s mode=continue-last", name)
+	}
+	return fmt.Sprintf("info: provider %s mode=fresh", name)
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
