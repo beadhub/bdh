@@ -58,24 +58,31 @@ type runCycleDecision struct {
 }
 
 type runState struct {
-	Run              int
-	SessionID        string
-	RanOnce          bool
-	RunInterrupted   bool
-	PauseAfterRun    bool
-	PauseNoticeShown bool
-	StopRequested    bool
-	Paused           bool
-	NextPrompt       string
-	PendingInput     bool
-	InputBuffer      string
-	TextProbe        string
-	SuppressText     bool
-	StructuredOut    bool
-	LastRunError     string
-	LastRunUsage     runUsageStats
-	HasRunUsage      bool
+	Run                int
+	SessionID          string
+	RanOnce            bool
+	RunInterrupted     bool
+	PauseAfterRun      bool
+	PauseNoticeShown   bool
+	StopRequested      bool
+	Paused             bool
+	ExitConfirmPending bool
+	NextPrompt         string
+	PendingInput       bool
+	InputBuffer        string
+	TextProbe          string
+	SuppressText       bool
+	StructuredOut      bool
+	LastRunError       string
+	LastRunUsage       runUsageStats
+	HasRunUsage        bool
 }
+
+const (
+	runPausedNoticeText = "paused. use /resume, /quit, or type a prompt to continue."
+	runPausedStatusText = "paused: /resume, /quit, or type a prompt"
+	runExitStatusText   = "exit bdh :run? [y/N]"
+)
 
 var (
 	runWaitSeconds  int
@@ -307,6 +314,14 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 				return nil
 			}
 			return err
+		}
+		if state.ExitConfirmPending {
+			if err := l.waitForExitConfirmation(ctx, state); err != nil {
+				if state.StopRequested && errors.Is(err, context.Canceled) {
+					return nil
+				}
+				return err
+			}
 		}
 		compacted, err := l.maybeAutoCompact(ctx, opts, state)
 		if err != nil {
@@ -636,7 +651,7 @@ func (l *runLoop) waitForNextCycle(ctx context.Context, waitSeconds int, state *
 		state.Paused = true
 		state.PauseAfterRun = false
 		if !state.PendingInput && !state.PauseNoticeShown {
-			l.println("paused. use /resume, /quit, or type a prompt to continue.")
+			l.println(runPausedNoticeText)
 			state.PauseNoticeShown = true
 		}
 		return l.waitWhilePaused(ctx, state)
@@ -650,7 +665,10 @@ func (l *runLoop) waitForWork(ctx context.Context, waitSeconds int, state *runSt
 }
 
 func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {
-	l.setStatusLine("paused: /resume, /quit, or type a prompt")
+	if state.ExitConfirmPending {
+		return l.waitForExitConfirmation(ctx, state)
+	}
+	l.setStatusLine(runPausedStatusText)
 	defer l.clearStatusLine()
 
 	for {
@@ -670,6 +688,12 @@ func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {
 			l.applyControlEvent(event, state, false, nil)
 			if state.StopRequested {
 				return context.Canceled
+			}
+			if state.ExitConfirmPending {
+				if err := l.waitForExitConfirmation(ctx, state); err != nil {
+					return err
+				}
+				continue
 			}
 			if strings.TrimSpace(state.NextPrompt) != "" {
 				state.Paused = false
@@ -704,6 +728,11 @@ func (l *runLoop) idleWithControlsLabel(ctx context.Context, seconds int, state 
 			if state.StopRequested {
 				return context.Canceled
 			}
+			if state.ExitConfirmPending {
+				if err := l.waitForExitConfirmation(ctx, state); err != nil {
+					return err
+				}
+			}
 			if strings.TrimSpace(state.NextPrompt) != "" {
 				return nil
 			}
@@ -732,8 +761,124 @@ func (l *runLoop) controlEvents() <-chan runControlEvent {
 	return l.control.Events()
 }
 
+func (l *runLoop) setExitConfirmation(active bool) {
+	if l.screen != nil {
+		l.screen.SetExitConfirmation(active)
+	}
+}
+
+func (l *runLoop) offerExit(state *runState) {
+	if state == nil {
+		return
+	}
+	state.ExitConfirmPending = true
+	l.setExitConfirmation(true)
+	l.setStatusLine(runExitStatusText)
+	if l.screen == nil {
+		l.println(runExitStatusText)
+	}
+}
+
+func (l *runLoop) cancelExitConfirmation(state *runState) {
+	if state == nil || !state.ExitConfirmPending {
+		return
+	}
+	state.ExitConfirmPending = false
+	l.setExitConfirmation(false)
+	if state.Paused {
+		l.setStatusLine(runPausedStatusText)
+		return
+	}
+	l.clearStatusLine()
+}
+
+func (l *runLoop) confirmExit(state *runState, activeRun bool, cancel context.CancelFunc) {
+	if state == nil {
+		return
+	}
+	state.PendingInput = false
+	state.InputBuffer = ""
+	state.StopRequested = true
+	state.Paused = false
+	state.PauseNoticeShown = false
+	state.PauseAfterRun = false
+	state.ExitConfirmPending = false
+	l.setExitConfirmation(false)
+	l.clearStatusLine()
+	l.renderInputPrompt(state)
+	if activeRun && cancel != nil {
+		l.println("\nquitting.")
+		cancel()
+	}
+}
+
+func (l *runLoop) clearPendingInput(state *runState) {
+	if state == nil {
+		return
+	}
+	state.PendingInput = false
+	state.InputBuffer = ""
+	l.renderInputPrompt(state)
+}
+
+func (l *runLoop) waitForExitConfirmation(ctx context.Context, state *runState) error {
+	if state == nil || !state.ExitConfirmPending {
+		return nil
+	}
+
+	l.setStatusLine(runExitStatusText)
+	for state.ExitConfirmPending && !state.StopRequested {
+		select {
+		case event := <-l.controlEvents():
+			l.applyControlEvent(event, state, false, nil)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if state.StopRequested {
+		return context.Canceled
+	}
+	return nil
+}
+
 func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, activeRun bool, cancel context.CancelFunc) {
 	l.logf("control event=%s active=%t text=%q", event.Type, activeRun, truncateRunText(strings.TrimSpace(event.Text), 120))
+
+	switch event.Type {
+	case runControlExitConfirm:
+		l.confirmExit(state, activeRun, cancel)
+		return
+	case runControlExitCancel:
+		l.cancelExitConfirmation(state)
+		l.renderInputPrompt(state)
+		return
+	case runControlInterrupt:
+		switch {
+		case state.ExitConfirmPending:
+			l.confirmExit(state, activeRun, cancel)
+		case state.PendingInput || state.InputBuffer != "":
+			l.clearPendingInput(state)
+		case activeRun && cancel != nil:
+			event = runControlEvent{Type: runControlStop}
+		default:
+			l.offerExit(state)
+			l.renderInputPrompt(state)
+			return
+		}
+	case runControlExitPrompt:
+		if state.ExitConfirmPending {
+			l.confirmExit(state, activeRun, cancel)
+			return
+		}
+		l.offerExit(state)
+		l.renderInputPrompt(state)
+		return
+	}
+
+	if state.ExitConfirmPending {
+		l.cancelExitConfirmation(state)
+	}
+
 	switch event.Type {
 	case runControlTypingStarted:
 		state.PendingInput = true
@@ -766,7 +911,7 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		if activeRun {
 			l.println("\nwill pause after this run.")
 		} else {
-			l.println("paused. use /resume, /quit, or type a prompt to continue.")
+			l.println(runPausedNoticeText)
 			state.PauseNoticeShown = true
 		}
 	case runControlResume:
@@ -797,12 +942,12 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		state.PauseAfterRun = true
 		if activeRun && cancel != nil {
 			state.RunInterrupted = true
-			l.println("\nstopped current run. paused. use /resume, /quit, or type a prompt to continue.")
+			l.println("\nstopped current run. " + runPausedNoticeText)
 			state.PauseNoticeShown = true
 			cancel()
 			return
 		}
-		l.println("paused. use /resume, /quit, or type a prompt to continue.")
+		l.println(runPausedNoticeText)
 		state.PauseNoticeShown = true
 	}
 }

@@ -14,6 +14,10 @@ const (
 	runControlStop          runControlEventType = "stop"
 	runControlWait          runControlEventType = "wait"
 	runControlResume        runControlEventType = "resume"
+	runControlInterrupt     runControlEventType = "interrupt"
+	runControlExitPrompt    runControlEventType = "exit_prompt"
+	runControlExitConfirm   runControlEventType = "exit_confirm"
+	runControlExitCancel    runControlEventType = "exit_cancel"
 )
 
 type runControlEvent struct {

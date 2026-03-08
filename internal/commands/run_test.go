@@ -602,6 +602,119 @@ func TestApplyControlEventStopLatchesPauseAfterRunDuringActiveRun(t *testing.T) 
 	}
 }
 
+func TestApplyControlEventInterruptClearsPendingInput(t *testing.T) {
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
+	loop := &runLoop{screen: screen}
+	state := &runState{
+		PendingInput: true,
+		InputBuffer:  "draft",
+	}
+	canceled := false
+
+	loop.applyControlEvent(runControlEvent{Type: runControlInterrupt}, state, true, func() {
+		canceled = true
+	})
+
+	if canceled {
+		t.Fatal("expected ctrl-c with pending input to clear the buffer, not cancel the run")
+	}
+	if state.PendingInput {
+		t.Fatal("expected pending input to clear")
+	}
+	if state.InputBuffer != "" {
+		t.Fatalf("expected input buffer to clear, got %q", state.InputBuffer)
+	}
+	if screen.inputLine != defaultRunInputPromptLabel {
+		t.Fatalf("expected cleared screen input line, got %q", screen.inputLine)
+	}
+}
+
+func TestApplyControlEventInterruptStopsActiveRunWithoutInput(t *testing.T) {
+	loop := &runLoop{out: io.Discard}
+	state := &runState{}
+	canceled := false
+
+	loop.applyControlEvent(runControlEvent{Type: runControlInterrupt}, state, true, func() {
+		canceled = true
+	})
+
+	if !canceled {
+		t.Fatal("expected ctrl-c during active run to stop the run")
+	}
+	if !state.RunInterrupted {
+		t.Fatal("expected ctrl-c during active run to mark the run interrupted")
+	}
+}
+
+func TestApplyControlEventInterruptOffersExitWhenIdle(t *testing.T) {
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
+	loop := &runLoop{screen: screen}
+	state := &runState{}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlInterrupt}, state, false, nil)
+
+	if !state.ExitConfirmPending {
+		t.Fatal("expected ctrl-c with no input to offer exit")
+	}
+	if !screen.exitConfirm {
+		t.Fatal("expected screen to enter exit confirmation mode")
+	}
+}
+
+func TestApplyControlEventInterruptConfirmsExitWhenAlreadyPrompting(t *testing.T) {
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
+	loop := &runLoop{screen: screen}
+	state := &runState{ExitConfirmPending: true}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlInterrupt}, state, false, nil)
+
+	if !state.StopRequested {
+		t.Fatal("expected second ctrl-c to confirm exit")
+	}
+	if screen.exitConfirm {
+		t.Fatal("expected exit confirmation mode to clear after confirming")
+	}
+}
+
+func TestApplyControlEventExitPromptOffersThenConfirmsExit(t *testing.T) {
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
+	loop := &runLoop{screen: screen}
+	state := &runState{
+		PendingInput: true,
+		InputBuffer:  "draft",
+	}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlExitPrompt}, state, false, nil)
+	if !state.ExitConfirmPending {
+		t.Fatal("expected ctrl-d to offer exit")
+	}
+	if state.InputBuffer != "draft" {
+		t.Fatalf("expected ctrl-d to preserve input, got %q", state.InputBuffer)
+	}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlExitConfirm}, state, false, nil)
+	if !state.StopRequested {
+		t.Fatal("expected confirmed exit to stop the loop")
+	}
+}
+
+func TestApplyControlEventExitPromptDoesNotStopActiveRunUntilConfirmed(t *testing.T) {
+	loop := &runLoop{out: io.Discard}
+	state := &runState{}
+	canceled := false
+
+	loop.applyControlEvent(runControlEvent{Type: runControlExitPrompt}, state, true, func() {
+		canceled = true
+	})
+
+	if canceled {
+		t.Fatal("expected first ctrl-d to offer exit, not cancel the run")
+	}
+	if !state.ExitConfirmPending {
+		t.Fatal("expected exit confirmation to be pending")
+	}
+}
+
 func TestRunLoopQuitCancelsActiveRunAndExits(t *testing.T) {
 	controller := newFakeRunInputController()
 	runStarted := make(chan struct{})
