@@ -71,12 +71,12 @@ func TestRunLoopStartsFreshThenKeepsExactSessionWithoutContinueMode(t *testing.T
 	if strings.Contains(strings.Join(commands[0], " "), "--resume") {
 		t.Fatalf("first run should not resume an existing session: %q", strings.Join(commands[0], " "))
 	}
-	if !strings.Contains(strings.Join(commands[1], " "), "--resume sess-42") {
-		t.Fatalf("second run should resume exact captured session even without --continue: %q", strings.Join(commands[1], " "))
+	if !strings.Contains(strings.Join(commands[1], " "), "--continue") {
+		t.Fatalf("second run should continue the same claude session even without --continue: %q", strings.Join(commands[1], " "))
 	}
 }
 
-func TestRunLoopUsesContinueWhenEnabled(t *testing.T) {
+func TestRunLoopFailsIfFollowUpContinuityCannotBeGuaranteed(t *testing.T) {
 	provider := claudeProvider{}
 	var commands [][]string
 
@@ -97,17 +97,17 @@ func TestRunLoopUsesContinueWhenEnabled(t *testing.T) {
 		ContinueMode: true,
 		MaxRuns:      2,
 	})
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
+	if err == nil {
+		t.Fatal("expected run to fail when the previous session id was not captured")
 	}
-	if len(commands) != 2 {
-		t.Fatalf("expected 2 commands, got %d", len(commands))
+	if len(commands) != 1 {
+		t.Fatalf("expected only the first command before continuity failure, got %d", len(commands))
 	}
 	if !strings.Contains(strings.Join(commands[0], " "), "--continue") {
 		t.Fatalf("first run should continue the most recent provider session: %q", strings.Join(commands[0], " "))
 	}
-	if !strings.Contains(strings.Join(commands[1], " "), "--continue") {
-		t.Fatalf("second run should continue the provider session when no exact session id was captured: %q", strings.Join(commands[1], " "))
+	if !strings.Contains(err.Error(), "cannot guarantee continuity") {
+		t.Fatalf("expected continuity failure, got %v", err)
 	}
 }
 
@@ -141,8 +141,43 @@ func TestRunLoopUsesExactSessionIDAfterFirstRunWhenContinueEnabled(t *testing.T)
 	if !strings.Contains(strings.Join(commands[0], " "), "--continue") {
 		t.Fatalf("first run should use provider continue mode, got: %q", strings.Join(commands[0], " "))
 	}
-	if !strings.Contains(strings.Join(commands[1], " "), "--resume sess-42") {
-		t.Fatalf("second run should resume exact captured session id, got: %q", strings.Join(commands[1], " "))
+	if !strings.Contains(strings.Join(commands[1], " "), "--continue") {
+		t.Fatalf("second run should stay on the same claude session via --continue, got: %q", strings.Join(commands[1], " "))
+	}
+}
+
+func TestRunLoopUsesExactSessionIDForCodexFollowUps(t *testing.T) {
+	provider := codexProvider{}
+	var commands [][]string
+
+	loop := &runLoop{
+		provider: provider,
+		now:      func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) },
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		out:      io.Discard,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
+			commands = append(commands, append([]string(nil), argv...))
+			onLine(`{"type":"thread.started","thread_id":"019ccab4-4844-7ff3-80f2-b2d3b0c25e79"}`)
+			onLine(`{"type":"turn.completed"}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		Prompt:  "continue working",
+		MaxRuns: 2,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(commands) != 2 {
+		t.Fatalf("expected 2 commands, got %d", len(commands))
+	}
+	if containsText(joinArgs(commands[0]), "resume") {
+		t.Fatalf("first codex run should start fresh, got %q", joinArgs(commands[0]))
+	}
+	if !containsText(joinArgs(commands[1]), "resume 019ccab4-4844-7ff3-80f2-b2d3b0c25e79") {
+		t.Fatalf("second codex run should use exact session id, got %q", joinArgs(commands[1]))
 	}
 }
 
@@ -204,7 +239,7 @@ func TestRunLoopAddsBlankLineBetweenStructuredOutputAndText(t *testing.T) {
 		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			onLine(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"pwd"}}]}}`)
 			onLine(`{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"Done reading."}}}`)
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -266,7 +301,7 @@ func TestRunLoopInitialPromptAppliesOnlyToFirstRun(t *testing.T) {
 		out:      io.Discard,
 		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -306,7 +341,7 @@ func TestRunLoopStopsAfterOneRunWhenOnlyInitialPromptExistsWithoutDispatch(t *te
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			runCount++
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -346,7 +381,7 @@ func TestRunLoopIdleCountdown(t *testing.T) {
 			return nil
 		},
 		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -395,12 +430,13 @@ func TestRunLoopStopCancelsActiveRunAndPausesUntilResume(t *testing.T) {
 
 			if currentRun == 1 {
 				close(runStarted)
+				onLine(`{"type":"system","subtype":"init","session_id":"sess-42"}`)
 				<-ctx.Done()
 				return ctx.Err()
 			}
 
 			close(secondRunStarted)
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -473,12 +509,13 @@ func TestRunLoopStopTreatsCanceledProcessExitAsNonFatal(t *testing.T) {
 
 			if currentRun == 1 {
 				close(runStarted)
+				onLine(`{"type":"system","subtype":"init","session_id":"sess-42"}`)
 				<-ctx.Done()
 				return errors.New("signal: killed")
 			}
 
 			close(secondRunStarted)
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -602,6 +639,137 @@ func TestApplyControlEventStopLatchesPauseAfterRunDuringActiveRun(t *testing.T) 
 	}
 }
 
+func TestApplyControlEventInterruptClearsPendingInput(t *testing.T) {
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
+	loop := &runLoop{screen: screen}
+	state := &runState{
+		PendingInput: true,
+		InputBuffer:  "draft",
+	}
+	canceled := false
+
+	loop.applyControlEvent(runControlEvent{Type: runControlInterrupt}, state, true, func() {
+		canceled = true
+	})
+
+	if canceled {
+		t.Fatal("expected ctrl-c with pending input to clear the buffer, not cancel the run")
+	}
+	if state.PendingInput {
+		t.Fatal("expected pending input to clear")
+	}
+	if state.InputBuffer != "" {
+		t.Fatalf("expected input buffer to clear, got %q", state.InputBuffer)
+	}
+	if screen.inputLine != defaultRunInputPromptLabel {
+		t.Fatalf("expected cleared screen input line, got %q", screen.inputLine)
+	}
+}
+
+func TestApplyControlEventInterruptClearsActiveScreenInput(t *testing.T) {
+	screen := &runScreenManager{
+		promptLabel: defaultRunInputPromptLabel,
+		inputLine:   defaultRunInputPromptLabel + "draft",
+	}
+	loop := &runLoop{screen: screen}
+	state := &runState{
+		PendingInput: true,
+		InputBuffer:  "draft",
+	}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlInterrupt}, state, false, nil)
+
+	if screen.inputLine != defaultRunInputPromptLabel {
+		t.Fatalf("expected active screen input to clear, got %q", screen.inputLine)
+	}
+}
+
+func TestApplyControlEventInterruptStopsActiveRunWithoutInput(t *testing.T) {
+	loop := &runLoop{out: io.Discard}
+	state := &runState{}
+	canceled := false
+
+	loop.applyControlEvent(runControlEvent{Type: runControlInterrupt}, state, true, func() {
+		canceled = true
+	})
+
+	if !canceled {
+		t.Fatal("expected ctrl-c during active run to stop the run")
+	}
+	if !state.RunInterrupted {
+		t.Fatal("expected ctrl-c during active run to mark the run interrupted")
+	}
+}
+
+func TestApplyControlEventInterruptOffersExitWhenIdle(t *testing.T) {
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
+	loop := &runLoop{screen: screen}
+	state := &runState{}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlInterrupt}, state, false, nil)
+
+	if !state.ExitConfirmPending {
+		t.Fatal("expected ctrl-c with no input to offer exit")
+	}
+	if !screen.exitConfirm {
+		t.Fatal("expected screen to enter exit confirmation mode")
+	}
+}
+
+func TestApplyControlEventInterruptConfirmsExitWhenAlreadyPrompting(t *testing.T) {
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
+	loop := &runLoop{screen: screen}
+	state := &runState{ExitConfirmPending: true}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlInterrupt}, state, false, nil)
+
+	if !state.StopRequested {
+		t.Fatal("expected second ctrl-c to confirm exit")
+	}
+	if screen.exitConfirm {
+		t.Fatal("expected exit confirmation mode to clear after confirming")
+	}
+}
+
+func TestApplyControlEventExitPromptOffersThenConfirmsExit(t *testing.T) {
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
+	loop := &runLoop{screen: screen}
+	state := &runState{
+		PendingInput: true,
+		InputBuffer:  "draft",
+	}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlExitPrompt}, state, false, nil)
+	if !state.ExitConfirmPending {
+		t.Fatal("expected ctrl-d to offer exit")
+	}
+	if state.InputBuffer != "draft" {
+		t.Fatalf("expected ctrl-d to preserve input, got %q", state.InputBuffer)
+	}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlExitConfirm}, state, false, nil)
+	if !state.StopRequested {
+		t.Fatal("expected confirmed exit to stop the loop")
+	}
+}
+
+func TestApplyControlEventExitPromptDoesNotStopActiveRunUntilConfirmed(t *testing.T) {
+	loop := &runLoop{out: io.Discard}
+	state := &runState{}
+	canceled := false
+
+	loop.applyControlEvent(runControlEvent{Type: runControlExitPrompt}, state, true, func() {
+		canceled = true
+	})
+
+	if canceled {
+		t.Fatal("expected first ctrl-d to offer exit, not cancel the run")
+	}
+	if !state.ExitConfirmPending {
+		t.Fatal("expected exit confirmation to be pending")
+	}
+}
+
 func TestRunLoopQuitCancelsActiveRunAndExits(t *testing.T) {
 	controller := newFakeRunInputController()
 	runStarted := make(chan struct{})
@@ -669,7 +837,7 @@ func TestRunLoopWaitPausesUntilResume(t *testing.T) {
 				close(secondRunStarted)
 			}
 
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -742,7 +910,7 @@ func TestRunLoopPromptOverrideFromActiveRun(t *testing.T) {
 				<-releaseFirstRun
 			}
 
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -817,7 +985,7 @@ func TestRunLoopPromptOverrideForcesRunWhenDispatchWouldSkip(t *testing.T) {
 				<-releaseFirstRun
 			}
 
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -894,7 +1062,7 @@ func TestRunLoopPromptOverrideBypassesDispatchCyclePrompt(t *testing.T) {
 				<-releaseFirstRun
 			}
 
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -938,6 +1106,94 @@ func TestRunLoopPromptOverrideBypassesDispatchCyclePrompt(t *testing.T) {
 	}
 }
 
+func TestRunLoopManualPromptTurnsAutofeedOffForLaterDispatches(t *testing.T) {
+	controller := newFakeRunInputController()
+	firstRunStarted := make(chan struct{})
+	releaseFirstRun := make(chan struct{})
+	var commands [][]string
+	var output strings.Builder
+	var mu sync.Mutex
+	runCount := 0
+
+	dispatcher := &fakeRunDispatcher{
+		decisions: []runDispatchDecision{
+			{Prompt: "Continue working on bdh-421.3: Dispatch logic.", WaitSeconds: 0},
+			{Prompt: "Respond to chat from mia.", WaitSeconds: 0},
+		},
+	}
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      &output,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		control:  controller,
+		dispatch: dispatcher,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
+			mu.Lock()
+			runCount++
+			currentRun := runCount
+			commands = append(commands, append([]string(nil), argv...))
+			mu.Unlock()
+
+			if currentRun == 1 {
+				close(firstRunStarted)
+				<-releaseFirstRun
+			}
+
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
+			return nil
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- loop.Run(context.Background(), runLoopOptions{
+			Prompt:        "persistent mission",
+			WaitSeconds:   0,
+			MaxRuns:       3,
+			AutofeedBeads: true,
+		})
+	}()
+
+	select {
+	case <-firstRunStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for first run")
+	}
+
+	controller.send(runControlEvent{Type: runControlPrompt, Text: "manual follow-up"})
+	close(releaseFirstRun)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("timed out waiting for loop to finish")
+	}
+
+	if len(dispatcher.autofeedStates) != 2 {
+		t.Fatalf("expected 2 dispatch cycles, got %d", len(dispatcher.autofeedStates))
+	}
+	if !dispatcher.autofeedStates[0] {
+		t.Fatal("expected first dispatch cycle to run with autofeed on")
+	}
+	if dispatcher.autofeedStates[1] {
+		t.Fatal("expected manual prompt to disable autofeed for the next dispatch cycle")
+	}
+	if len(commands) != 3 {
+		t.Fatalf("expected 3 runs, got %d", len(commands))
+	}
+	if !containsText(joinArgs(commands[1]), "manual follow-up") {
+		t.Fatalf("expected second run to use manual prompt, got %q", joinArgs(commands[1]))
+	}
+	if !containsText(output.String(), "info: bead autofeed disabled for manual conversation") {
+		t.Fatalf("expected autofeed disable notice, got %q", output.String())
+	}
+}
+
 func TestRunLoopInitialPromptForcesRunWhenDispatchWouldSkip(t *testing.T) {
 	dispatcher := &fakeRunDispatcher{
 		decisions: []runDispatchDecision{
@@ -954,7 +1210,7 @@ func TestRunLoopInitialPromptForcesRunWhenDispatchWouldSkip(t *testing.T) {
 		dispatch: dispatcher,
 		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -975,6 +1231,46 @@ func TestRunLoopInitialPromptForcesRunWhenDispatchWouldSkip(t *testing.T) {
 	}
 }
 
+func TestApplyControlEventAutofeedCommandsToggleState(t *testing.T) {
+	var output strings.Builder
+	loop := &runLoop{out: &output}
+	state := &runState{}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlAutofeedOn}, state, false, nil)
+	if !state.AutofeedBeads {
+		t.Fatal("expected /autofeed on to enable autofeed")
+	}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlAutofeedOff}, state, false, nil)
+	if state.AutofeedBeads {
+		t.Fatal("expected /autofeed off to disable autofeed")
+	}
+
+	text := output.String()
+	if !containsText(text, "info: bead autofeed on") {
+		t.Fatalf("expected autofeed-on notice, got %q", text)
+	}
+	if !containsText(text, "info: bead autofeed off") {
+		t.Fatalf("expected autofeed-off notice, got %q", text)
+	}
+}
+
+func TestApplyControlEventAutofeedCommandsUpdateScreenStatusLine(t *testing.T) {
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
+	loop := &runLoop{screen: screen}
+	state := &runState{}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlAutofeedOn}, state, false, nil)
+	if screen.statusLine != "bead autofeed on" {
+		t.Fatalf("expected on status line, got %q", screen.statusLine)
+	}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlAutofeedOff}, state, false, nil)
+	if screen.statusLine != "bead autofeed off" {
+		t.Fatalf("expected off status line, got %q", screen.statusLine)
+	}
+}
+
 func TestRunLoopInitialPromptBypassesDispatchCyclePrompt(t *testing.T) {
 	dispatcher := &fakeRunDispatcher{
 		decisions: []runDispatchDecision{
@@ -991,7 +1287,7 @@ func TestRunLoopInitialPromptBypassesDispatchCyclePrompt(t *testing.T) {
 		dispatch: dispatcher,
 		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -1043,7 +1339,7 @@ func TestRunLoopTypingDuringActiveRunDoesNotPauseLoop(t *testing.T) {
 				close(secondRunStarted)
 			}
 
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -1283,12 +1579,12 @@ func TestApplyControlEvent_BufferUpdatedRendersInputPrompt(t *testing.T) {
 	loop := &runLoop{out: &output}
 	state := &runState{Paused: true}
 
-	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: "/wait"}, state, false, nil)
+	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: "/autofeed on"}, state, false, nil)
 
-	if state.InputBuffer != "/wait" {
+	if state.InputBuffer != "/autofeed on" {
 		t.Fatalf("expected input buffer to update, got %q", state.InputBuffer)
 	}
-	if !containsText(output.String(), defaultRunInputPromptLabel+"/wait") {
+	if !containsText(output.String(), defaultRunInputPromptLabel+"/autofeed on") {
 		t.Fatalf("expected rendered input prompt, got %q", output.String())
 	}
 }
@@ -1298,9 +1594,9 @@ func TestApplyControlEvent_BufferUpdatedRendersInputPromptOnScreen(t *testing.T)
 	loop := &runLoop{screen: screen}
 	state := &runState{Paused: true}
 
-	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: "/wait"}, state, false, nil)
+	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: "/autofeed on"}, state, false, nil)
 
-	if screen.inputLine != defaultRunInputPromptLabel+"/wait" {
+	if screen.inputLine != defaultRunInputPromptLabel+"/autofeed on" {
 		t.Fatalf("expected screen input line, got %q", screen.inputLine)
 	}
 }

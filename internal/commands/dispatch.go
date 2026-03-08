@@ -14,7 +14,7 @@ import (
 )
 
 type runDispatcher interface {
-	Next(ctx context.Context) (runDispatchDecision, error)
+	Next(ctx context.Context, autofeedBeads bool) (runDispatchDecision, error)
 }
 
 type runDispatchDecision struct {
@@ -53,7 +53,6 @@ type runReadyTask struct {
 
 type runDispatchDefaults struct {
 	IdleWaitSeconds      int
-	IgnoreBeads          bool
 	WorkPromptSuffix     string
 	CommsPromptSuffix    string
 	HasWorkPromptSuffix  bool
@@ -83,15 +82,15 @@ func newBeadhubRunDispatcher(cfg *config.Config, aw *aweb.Client, defaults runDi
 	return dispatcher
 }
 
-func (d *beadhubRunDispatcher) Next(ctx context.Context) (runDispatchDecision, error) {
-	summary, err := d.summary(ctx)
+func (d *beadhubRunDispatcher) Next(ctx context.Context, autofeedBeads bool) (runDispatchDecision, error) {
+	summary, err := d.summary(ctx, autofeedBeads)
 	if err != nil {
 		return runDispatchDecision{}, err
 	}
-	return selectRunDispatch(summary, d.defaults), nil
+	return selectRunDispatch(summary, d.defaults, autofeedBeads), nil
 }
 
-func (d *beadhubRunDispatcher) summary(ctx context.Context) (runDispatchSummary, error) {
+func (d *beadhubRunDispatcher) summary(ctx context.Context, autofeedBeads bool) (runDispatchSummary, error) {
 	summary := runDispatchSummary{}
 
 	if pendingResp, err := d.aw.ChatPending(ctx); err == nil && len(pendingResp.Pending) > 0 {
@@ -120,13 +119,13 @@ func (d *beadhubRunDispatcher) summary(ctx context.Context) (runDispatchSummary,
 	}
 
 	if status, err := fetchStatusWithConfig(d.cfg); err == nil && len(status.YourClaims) > 0 {
-		if !d.defaults.IgnoreBeads {
+		if autofeedBeads {
 			claim := status.YourClaims[0]
 			summary.CurrentClaim = &claim
 		}
 	}
 
-	if !d.defaults.IgnoreBeads {
+	if autofeedBeads {
 		if readyTasks, err := d.readyTasks(ctx); err == nil && len(readyTasks) > 0 {
 			task := readyTasks[0]
 			summary.ReadyTask = &task
@@ -172,29 +171,27 @@ func withRunDispatchDefaults(defaults runDispatchDefaults) runDispatchDefaults {
 	return defaults
 }
 
-func selectRunDispatch(summary runDispatchSummary, defaults runDispatchDefaults) runDispatchDecision {
+func selectRunDispatch(summary runDispatchSummary, defaults runDispatchDefaults, autofeedBeads bool) runDispatchDecision {
 	defaults = withRunDispatchDefaults(defaults)
+	commsPrompt := buildRunDispatchCommsPrompt(summary)
+	beadPrompt := buildRunDispatchBeadPrompt(summary, autofeedBeads)
+	promptParts := make([]string, 0, 2)
+	if strings.TrimSpace(commsPrompt) != "" {
+		promptParts = append(promptParts, appendRunPromptSuffix(commsPrompt, defaults.CommsPromptSuffix))
+	}
+	if strings.TrimSpace(beadPrompt) != "" {
+		promptParts = append(promptParts, appendRunPromptSuffix(beadPrompt, defaults.WorkPromptSuffix))
+	}
 
 	switch {
-	case summary.PendingChat != nil:
-		return runDispatchDecision{
-			Prompt:      appendRunPromptSuffix(buildPendingChatPrompt(*summary.PendingChat), defaults.CommsPromptSuffix),
-			WaitSeconds: 5,
+	case len(promptParts) > 0:
+		waitSeconds := 20
+		if strings.TrimSpace(commsPrompt) != "" {
+			waitSeconds = 5
 		}
-	case len(summary.UnreadMail) > 0:
 		return runDispatchDecision{
-			Prompt:      appendRunPromptSuffix(buildUnreadMailPrompt(summary.UnreadMail), defaults.CommsPromptSuffix),
-			WaitSeconds: 5,
-		}
-	case !defaults.IgnoreBeads && summary.CurrentClaim != nil:
-		return runDispatchDecision{
-			Prompt:      appendRunPromptSuffix(buildClaimPrompt(*summary.CurrentClaim), defaults.WorkPromptSuffix),
-			WaitSeconds: 20,
-		}
-	case !defaults.IgnoreBeads && summary.ReadyTask != nil:
-		return runDispatchDecision{
-			Prompt:      appendRunPromptSuffix(buildReadyTaskPrompt(*summary.ReadyTask), defaults.WorkPromptSuffix),
-			WaitSeconds: 20,
+			Prompt:      strings.Join(promptParts, "\n\n"),
+			WaitSeconds: waitSeconds,
 		}
 	default:
 		return runDispatchDecision{
@@ -202,6 +199,30 @@ func selectRunDispatch(summary runDispatchSummary, defaults runDispatchDefaults)
 			Skip:        true,
 		}
 	}
+}
+
+func buildRunDispatchCommsPrompt(summary runDispatchSummary) string {
+	parts := make([]string, 0, 2)
+	if summary.PendingChat != nil {
+		parts = append(parts, buildPendingChatPrompt(*summary.PendingChat))
+	}
+	if len(summary.UnreadMail) > 0 {
+		parts = append(parts, buildUnreadMailPrompt(summary.UnreadMail))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func buildRunDispatchBeadPrompt(summary runDispatchSummary, autofeedBeads bool) string {
+	if !autofeedBeads {
+		return ""
+	}
+	if summary.CurrentClaim != nil {
+		return buildClaimPrompt(*summary.CurrentClaim)
+	}
+	if summary.ReadyTask != nil {
+		return buildReadyTaskPrompt(*summary.ReadyTask)
+	}
+	return ""
 }
 
 func buildClaimPrompt(claim ClaimInfo) string {

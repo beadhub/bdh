@@ -10,14 +10,16 @@ import (
 )
 
 type fakeRunDispatcher struct {
-	decisions []runDispatchDecision
-	err       error
+	decisions      []runDispatchDecision
+	autofeedStates []bool
+	err            error
 }
 
-func (f *fakeRunDispatcher) Next(context.Context) (runDispatchDecision, error) {
+func (f *fakeRunDispatcher) Next(_ context.Context, autofeedBeads bool) (runDispatchDecision, error) {
 	if f.err != nil {
 		return runDispatchDecision{}, f.err
 	}
+	f.autofeedStates = append(f.autofeedStates, autofeedBeads)
 	if len(f.decisions) == 0 {
 		return runDispatchDecision{}, errors.New("no dispatch decisions left")
 	}
@@ -26,12 +28,12 @@ func (f *fakeRunDispatcher) Next(context.Context) (runDispatchDecision, error) {
 	return decision, nil
 }
 
-func TestSelectRunDispatchPriority(t *testing.T) {
+func TestSelectRunDispatchCombinesCommsAndClaimPromptWhenAutofeedOn(t *testing.T) {
 	defaults := withRunDispatchDefaults(runDispatchDefaults{})
 	claim := ClaimInfo{BeadID: "bdh-421.3", Title: "Dispatch logic"}
 	task := runReadyTask{ID: "bdh-54y", Title: "List active"}
 
-	chatDecision := selectRunDispatch(runDispatchSummary{
+	decision := selectRunDispatch(runDispatchSummary{
 		PendingChat: &runPendingChat{
 			Alias: "grace",
 			Messages: []runCommsMessage{
@@ -41,53 +43,24 @@ func TestSelectRunDispatchPriority(t *testing.T) {
 		UnreadMail:   []runUnreadMail{{From: "mia", Subject: "triage", Body: "mail body"}},
 		CurrentClaim: &claim,
 		ReadyTask:    &task,
-	}, defaults)
-	if !containsText(chatDecision.Prompt, "Respond to chat from grace") {
-		t.Fatalf("expected chat prompt, got: %q", chatDecision.Prompt)
+	}, defaults, true)
+	if !containsText(decision.Prompt, "Respond to chat from grace") {
+		t.Fatalf("expected chat prompt, got: %q", decision.Prompt)
 	}
-	if !containsText(chatDecision.Prompt, "Please validate the latest run behavior.") {
-		t.Fatalf("expected chat content in prompt, got: %q", chatDecision.Prompt)
+	if !containsText(decision.Prompt, "Please validate the latest run behavior.") {
+		t.Fatalf("expected chat content in prompt, got: %q", decision.Prompt)
 	}
-	if chatDecision.WaitSeconds != 5 {
-		t.Fatalf("expected short wait for chat, got %d", chatDecision.WaitSeconds)
+	if !containsText(decision.Prompt, "From: mia") {
+		t.Fatalf("expected mail prompt, got: %q", decision.Prompt)
 	}
-
-	mailDecision := selectRunDispatch(runDispatchSummary{
-		UnreadMail: []runUnreadMail{
-			{From: "mia", Subject: "Review", Body: "Can you review the command flow?"},
-		},
-		CurrentClaim: &claim,
-		ReadyTask:    &task,
-	}, defaults)
-	if !containsText(mailDecision.Prompt, "From: mia") {
-		t.Fatalf("expected mail prompt, got: %q", mailDecision.Prompt)
+	if !containsText(decision.Prompt, "Continue working on bdh-421.3: Dispatch logic") {
+		t.Fatalf("expected current-claim prompt, got: %q", decision.Prompt)
 	}
-	if !containsText(mailDecision.Prompt, "Can you review the command flow?") {
-		t.Fatalf("expected mail body in prompt, got: %q", mailDecision.Prompt)
+	if containsText(decision.Prompt, "Pick up bdh-54y: List active") {
+		t.Fatalf("expected claim to suppress ready-task prompt, got: %q", decision.Prompt)
 	}
-
-	claimDecision := selectRunDispatch(runDispatchSummary{
-		CurrentClaim: &claim,
-		ReadyTask:    &task,
-	}, defaults)
-	if !containsText(claimDecision.Prompt, "Continue working on bdh-421.3: Dispatch logic") {
-		t.Fatalf("expected current-claim prompt, got: %q", claimDecision.Prompt)
-	}
-	if !containsText(claimDecision.Prompt, "code-reviewer pass") {
-		t.Fatalf("expected review reminder, got: %q", claimDecision.Prompt)
-	}
-
-	readyDecision := selectRunDispatch(runDispatchSummary{ReadyTask: &task}, defaults)
-	if !containsText(readyDecision.Prompt, "Pick up bdh-54y: List active") {
-		t.Fatalf("expected ready-task prompt, got: %q", readyDecision.Prompt)
-	}
-
-	idleDecision := selectRunDispatch(runDispatchSummary{}, defaults)
-	if idleDecision.WaitSeconds != 30 {
-		t.Fatalf("expected long idle wait, got %d", idleDecision.WaitSeconds)
-	}
-	if !idleDecision.Skip {
-		t.Fatalf("expected idle dispatch to skip provider launch")
+	if decision.WaitSeconds != 5 {
+		t.Fatalf("expected short wait when comms are present, got %d", decision.WaitSeconds)
 	}
 }
 
@@ -100,7 +73,7 @@ func TestSelectRunDispatchUsesConfiguredSuffixes(t *testing.T) {
 	})
 	claim := ClaimInfo{BeadID: "bdh-421.3", Title: "Dispatch logic"}
 
-	workDecision := selectRunDispatch(runDispatchSummary{CurrentClaim: &claim}, defaults)
+	workDecision := selectRunDispatch(runDispatchSummary{CurrentClaim: &claim}, defaults, true)
 	if !containsText(workDecision.Prompt, "custom work suffix") {
 		t.Fatalf("expected work suffix in prompt, got %q", workDecision.Prompt)
 	}
@@ -112,7 +85,7 @@ func TestSelectRunDispatchUsesConfiguredSuffixes(t *testing.T) {
 				{From: "grace", Body: "Please validate the latest run behavior."},
 			},
 		},
-	}, defaults)
+	}, defaults, false)
 	if !containsText(commsDecision.Prompt, "custom comms suffix") {
 		t.Fatalf("expected comms suffix in prompt, got %q", commsDecision.Prompt)
 	}
@@ -125,32 +98,32 @@ func TestSelectRunDispatchAllowsEmptyConfiguredWorkSuffix(t *testing.T) {
 	})
 	claim := ClaimInfo{BeadID: "bdh-421.3", Title: "Dispatch logic"}
 
-	decision := selectRunDispatch(runDispatchSummary{CurrentClaim: &claim}, defaults)
+	decision := selectRunDispatch(runDispatchSummary{CurrentClaim: &claim}, defaults, true)
 	if containsText(decision.Prompt, "code-reviewer pass") {
 		t.Fatalf("expected empty configured work suffix to suppress default reminder, got %q", decision.Prompt)
 	}
 }
 
-func TestSelectRunDispatchIgnoreBeadsSkipsClaimAndReadyWork(t *testing.T) {
-	defaults := withRunDispatchDefaults(runDispatchDefaults{IgnoreBeads: true, IdleWaitSeconds: 17})
+func TestSelectRunDispatchAutofeedOffSkipsClaimAndReadyWork(t *testing.T) {
+	defaults := withRunDispatchDefaults(runDispatchDefaults{IdleWaitSeconds: 17})
 	claim := ClaimInfo{BeadID: "bdh-421.3", Title: "Dispatch logic"}
 	task := runReadyTask{ID: "bdh-54y", Title: "List active"}
 
 	decision := selectRunDispatch(runDispatchSummary{
 		CurrentClaim: &claim,
 		ReadyTask:    &task,
-	}, defaults)
+	}, defaults, false)
 
 	if !decision.Skip {
-		t.Fatalf("expected ignore-beads mode to skip when only bead work is present, got %#v", decision)
+		t.Fatalf("expected autofeed-off mode to skip when only bead work is present, got %#v", decision)
 	}
 	if decision.WaitSeconds != 17 {
 		t.Fatalf("expected configured idle wait, got %d", decision.WaitSeconds)
 	}
 }
 
-func TestSelectRunDispatchIgnoreBeadsStillWakesForComms(t *testing.T) {
-	defaults := withRunDispatchDefaults(runDispatchDefaults{IgnoreBeads: true})
+func TestSelectRunDispatchAutofeedOffStillWakesForComms(t *testing.T) {
+	defaults := withRunDispatchDefaults(runDispatchDefaults{})
 
 	chatDecision := selectRunDispatch(runDispatchSummary{
 		PendingChat: &runPendingChat{
@@ -159,18 +132,51 @@ func TestSelectRunDispatchIgnoreBeadsStillWakesForComms(t *testing.T) {
 				{From: "grace", Body: "Please reply on this now."},
 			},
 		},
-	}, defaults)
+		CurrentClaim: &ClaimInfo{BeadID: "bdh-421.3", Title: "Dispatch logic"},
+	}, defaults, false)
 	if chatDecision.Skip {
-		t.Fatalf("expected chat to wake agent even with ignore-beads")
+		t.Fatalf("expected chat to wake agent even with autofeed off")
+	}
+	if containsText(chatDecision.Prompt, "Continue working on") {
+		t.Fatalf("expected bead prompt to be omitted with autofeed off, got %q", chatDecision.Prompt)
 	}
 
 	mailDecision := selectRunDispatch(runDispatchSummary{
 		UnreadMail: []runUnreadMail{
 			{From: "grace", Subject: "Review", Body: "Please reply on this now."},
 		},
-	}, defaults)
+		ReadyTask: &runReadyTask{ID: "bdh-54y", Title: "List active"},
+	}, defaults, false)
 	if mailDecision.Skip {
-		t.Fatalf("expected mail to wake agent even with ignore-beads")
+		t.Fatalf("expected mail to wake agent even with autofeed off")
+	}
+	if containsText(mailDecision.Prompt, "Pick up bdh-54y") {
+		t.Fatalf("expected ready-bead prompt to be omitted with autofeed off, got %q", mailDecision.Prompt)
+	}
+}
+
+func TestSelectRunDispatchUsesReadyTaskWhenNoClaim(t *testing.T) {
+	defaults := withRunDispatchDefaults(runDispatchDefaults{})
+	task := runReadyTask{ID: "bdh-54y", Title: "List active"}
+
+	readyDecision := selectRunDispatch(runDispatchSummary{ReadyTask: &task}, defaults, true)
+	if !containsText(readyDecision.Prompt, "Pick up bdh-54y: List active") {
+		t.Fatalf("expected ready-task prompt, got: %q", readyDecision.Prompt)
+	}
+	if readyDecision.WaitSeconds != 20 {
+		t.Fatalf("expected work wait for ready task, got %d", readyDecision.WaitSeconds)
+	}
+}
+
+func TestSelectRunDispatchSkipsWhenNothingNeedsAttention(t *testing.T) {
+	defaults := withRunDispatchDefaults(runDispatchDefaults{})
+
+	idleDecision := selectRunDispatch(runDispatchSummary{}, defaults, false)
+	if idleDecision.WaitSeconds != 30 {
+		t.Fatalf("expected long idle wait, got %d", idleDecision.WaitSeconds)
+	}
+	if !idleDecision.Skip {
+		t.Fatalf("expected idle dispatch to skip provider launch")
 	}
 }
 
@@ -202,7 +208,7 @@ func TestRunLoopComposesBasePromptWithDispatcherPrompt(t *testing.T) {
 		dispatch: dispatcher,
 		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}

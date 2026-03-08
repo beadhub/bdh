@@ -36,7 +36,7 @@ func TestStyleRunScreenLineCategories(t *testing.T) {
 		{line: "  -> ok", want: "result"},
 		{line: "done  2.1s", want: "done"},
 		{line: "info: session", want: "info"},
-		{line: "type /wait, /stop", want: "hint"},
+		{line: "type /wait, /autofeed off, /stop", want: "hint"},
 		{line: "plain text", want: "plain"},
 	}
 
@@ -44,6 +44,24 @@ func TestStyleRunScreenLineCategories(t *testing.T) {
 		if got := runScreenLineStyleKind(tc.line); got != tc.want {
 			t.Fatalf("line %q: expected %s, got %s", tc.line, tc.want, got)
 		}
+	}
+}
+
+func TestStyleRunScreenLineKeepsToolArgumentsNeutralOnFirstLine(t *testing.T) {
+	styles := newRunScreenStyles()
+	got := styleRunScreenLine(`- View("/tmp/image.png")`, styles)
+	want := styles.tool.Render(`- View(`) + `"/tmp/image.png"` + styles.tool.Render(`)`)
+	if got != want {
+		t.Fatalf("unexpected styled tool line %q", got)
+	}
+}
+
+func TestStyleRunScreenLineColorsClosingParenOnContinuation(t *testing.T) {
+	styles := newRunScreenStyles()
+	got := styleRunScreenLine(`       offset=48)`, styles)
+	want := `       offset=48` + styles.tool.Render(`)`)
+	if got != want {
+		t.Fatalf("unexpected styled continuation line %q", got)
 	}
 }
 
@@ -57,6 +75,8 @@ func TestParseRunControlSubmission(t *testing.T) {
 		{input: "/stop", want: runControlStop},
 		{input: "/wait", want: runControlWait},
 		{input: "/resume", want: runControlResume},
+		{input: "/autofeed on", want: runControlAutofeedOn},
+		{input: "/autofeed off", want: runControlAutofeedOff},
 		{input: "fix the bug", want: runControlPrompt},
 	}
 
@@ -142,6 +162,9 @@ func TestRunScreenViewAddsBottomBreathingSpace(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
+		nil,
+		nil,
 	)
 	model.width = 40
 	model.height = 10
@@ -171,6 +194,9 @@ func TestRunScreenViewGrowsInputFooterWhenInputWraps(t *testing.T) {
 			InputLine:   "beadhub:bdh:noah> " + strings.Repeat("x", 40),
 			PromptLabel: "beadhub:bdh:noah> ",
 		},
+		nil,
+		nil,
+		nil,
 		nil,
 		nil,
 		nil,
@@ -205,6 +231,9 @@ func TestRunScreenViewKeepsFirstWrappedInputLineVisibleDuringTyping(t *testing.T
 		nil,
 		nil,
 		nil,
+		nil,
+		nil,
+		nil,
 	)
 	model.width = 30
 	model.height = 10
@@ -227,5 +256,62 @@ func TestRunScreenViewKeepsFirstWrappedInputLineVisibleDuringTyping(t *testing.T
 	continuation := "\n" + strings.Repeat(" ", lipgloss.Width(model.promptLabel)) + "xxx"
 	if !strings.Contains(view, continuation) {
 		t.Fatalf("expected wrapped continuation line to remain visible, got %q", view)
+	}
+}
+
+func TestRunScreenExitConfirmationAcceptsYWithoutTypingIntoInput(t *testing.T) {
+	confirmed := false
+	model := newRunScreenModel(
+		runScreenSnapshot{
+			InputLine:   "beadhub:bdh:noah> draft",
+			PromptLabel: "beadhub:bdh:noah> ",
+			ExitConfirm: true,
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		func() { confirmed = true },
+		nil,
+	)
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	model = updated.(runScreenModel)
+
+	if !confirmed {
+		t.Fatal("expected y to confirm exit")
+	}
+	if model.input.Value() != "draft" {
+		t.Fatalf("expected input to remain unchanged, got %q", model.input.Value())
+	}
+}
+
+func TestRunScreenExitConfirmationCancelsAndResumesTyping(t *testing.T) {
+	canceled := false
+	model := newRunScreenModel(
+		runScreenSnapshot{
+			InputLine:   "beadhub:bdh:noah> draft",
+			PromptLabel: "beadhub:bdh:noah> ",
+			ExitConfirm: true,
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		func() { canceled = true },
+	)
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	model = updated.(runScreenModel)
+
+	if !canceled {
+		t.Fatal("expected non-confirming input to cancel exit confirmation")
+	}
+	if model.exitConfirm {
+		t.Fatal("expected exit confirmation mode to clear")
+	}
+	if model.input.Value() != "draftx" {
+		t.Fatalf("expected typing to continue after canceling exit confirmation, got %q", model.input.Value())
 	}
 }

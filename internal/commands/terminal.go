@@ -14,6 +14,12 @@ const (
 	runControlStop          runControlEventType = "stop"
 	runControlWait          runControlEventType = "wait"
 	runControlResume        runControlEventType = "resume"
+	runControlAutofeedOn    runControlEventType = "autofeed_on"
+	runControlAutofeedOff   runControlEventType = "autofeed_off"
+	runControlInterrupt     runControlEventType = "interrupt"
+	runControlExitPrompt    runControlEventType = "exit_prompt"
+	runControlExitConfirm   runControlEventType = "exit_confirm"
+	runControlExitCancel    runControlEventType = "exit_cancel"
 )
 
 type runControlEvent struct {
@@ -39,6 +45,10 @@ func parseRunControlSubmission(text string) runControlEvent {
 		return runControlEvent{Type: runControlWait}
 	case "/resume":
 		return runControlEvent{Type: runControlResume}
+	case "/autofeed on":
+		return runControlEvent{Type: runControlAutofeedOn}
+	case "/autofeed off":
+		return runControlEvent{Type: runControlAutofeedOff}
 	default:
 		return runControlEvent{Type: runControlPrompt, Text: text}
 	}

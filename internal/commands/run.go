@@ -41,6 +41,7 @@ type runLoopOptions struct {
 	Prompt              string
 	WaitSeconds         int
 	MaxRuns             int
+	AutofeedBeads       bool
 	ContinueMode        bool
 	WorkingDir          string
 	AllowedTools        string
@@ -58,41 +59,49 @@ type runCycleDecision struct {
 }
 
 type runState struct {
-	Run              int
-	SessionID        string
-	RanOnce          bool
-	RunInterrupted   bool
-	PauseAfterRun    bool
-	PauseNoticeShown bool
-	StopRequested    bool
-	Paused           bool
-	NextPrompt       string
-	PendingInput     bool
-	InputBuffer      string
-	TextProbe        string
-	SuppressText     bool
-	StructuredOut    bool
-	LastRunError     string
-	LastRunUsage     runUsageStats
-	HasRunUsage      bool
+	Run                int
+	SessionID          string
+	RanOnce            bool
+	RunInterrupted     bool
+	PauseAfterRun      bool
+	PauseNoticeShown   bool
+	StopRequested      bool
+	Paused             bool
+	AutofeedBeads      bool
+	ExitConfirmPending bool
+	NextPrompt         string
+	PendingInput       bool
+	InputBuffer        string
+	TextProbe          string
+	SuppressText       bool
+	StructuredOut      bool
+	LastRunError       string
+	LastRunUsage       runUsageStats
+	HasRunUsage        bool
 }
 
+const (
+	runPausedNoticeText = "paused. use /resume, /quit, or type a prompt to continue."
+	runPausedStatusText = "paused: /resume, /quit, or type a prompt"
+	runExitStatusText   = "exit bdh :run? [y/N]"
+)
+
 var (
-	runWaitSeconds  int
-	runContinueMode bool
-	runMaxRuns      int
-	runIdleWait     int
-	runBasePrompt   string
-	runWorkPrompt   string
-	runCommsPrompt  string
-	runWorkingDir   string
-	runAllowedTools string
-	runModel        string
-	runCompactPct   int
-	runProviderName string
-	runIgnoreBeads  bool
-	runInitConfig   bool
-	runDebugMode    bool
+	runWaitSeconds   int
+	runContinueMode  bool
+	runMaxRuns       int
+	runIdleWait      int
+	runBasePrompt    string
+	runWorkPrompt    string
+	runCommsPrompt   string
+	runWorkingDir    string
+	runAllowedTools  string
+	runModel         string
+	runCompactPct    int
+	runProviderName  string
+	runAutofeedBeads bool
+	runInitConfig    bool
+	runDebugMode     bool
 )
 
 var runCmd = &cobra.Command{
@@ -104,7 +113,7 @@ Current implementation includes:
   - repeated provider invocations (currently Claude and Codex)
   - stream-json parsing and formatted output
   - provider session continuity when --continue is requested
-  - /stop, /wait, /resume, /quit, and prompt override controls
+  - /stop, /wait, /resume, /autofeed on|off, /quit, and prompt override controls
   - bdh-driven dispatch between runs (chat, mail, claims, ready work)
   - adaptive wait behavior based on dispatch priority
 
@@ -142,7 +151,6 @@ Future provider work will add more backends on top of the same loop.`,
 
 		dispatchDefaults := runDispatchDefaults{
 			IdleWaitSeconds:      settings.IdleWaitSeconds,
-			IgnoreBeads:          runIgnoreBeads,
 			WorkPromptSuffix:     settings.WorkPromptSuffix,
 			CommsPromptSuffix:    settings.CommsPromptSuffix,
 			HasWorkPromptSuffix:  true,
@@ -186,6 +194,7 @@ Future provider work will add more backends on top of the same loop.`,
 			Prompt:              settings.BasePrompt,
 			WaitSeconds:         settings.WaitSeconds,
 			MaxRuns:             runMaxRuns,
+			AutofeedBeads:       runAutofeedBeads,
 			ContinueMode:        runContinueMode,
 			WorkingDir:          runWorkingDir,
 			AllowedTools:        runAllowedTools,
@@ -218,7 +227,7 @@ func init() {
 	runCmd.Flags().StringVar(&runAllowedTools, "allowed-tools", "", "Provider-specific allowed tools string")
 	runCmd.Flags().StringVar(&runModel, "model", "", "Provider-specific model override")
 	runCmd.Flags().StringVar(&runProviderName, "provider", "claude", "Agent provider to run")
-	runCmd.Flags().BoolVar(&runIgnoreBeads, "ignore-beads", false, "Ignore claims and ready beads; only wake for incoming chat or unread mail")
+	runCmd.Flags().BoolVar(&runAutofeedBeads, "autofeed-beads", false, "Wake for claimed or ready beads in addition to incoming comms")
 	runCmd.Flags().BoolVar(&runInitConfig, "init", false, "Prompt for ~/.config/beadhub/run.json values and write them")
 	runCmd.Flags().BoolVar(&runDebugMode, "debug", false, "Enable detailed bdh :run debug logging (or set BDH_RUN_DEBUG=1)")
 }
@@ -245,7 +254,7 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 		}
 	}
 
-	state := &runState{}
+	state := &runState{AutofeedBeads: opts.AutofeedBeads}
 	logs, err := newRunLogSession(opts.WorkingDir, opts.Debug, l.now())
 	if err != nil {
 		return err
@@ -308,6 +317,14 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 			}
 			return err
 		}
+		if state.ExitConfirmPending {
+			if err := l.waitForExitConfirmation(ctx, state); err != nil {
+				if state.StopRequested && errors.Is(err, context.Canceled) {
+					return nil
+				}
+				return err
+			}
+		}
 		compacted, err := l.maybeAutoCompact(ctx, opts, state)
 		if err != nil {
 			if state.StopRequested && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
@@ -354,7 +371,7 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 		}, nil
 	}
 	if l.dispatch != nil {
-		decision, err := l.dispatch.Next(ctx)
+		decision, err := l.dispatch.Next(ctx, state.AutofeedBeads)
 		if err != nil {
 			l.logf("dispatch error: %v", err)
 			l.printf("info: dispatch failed: %v\n", err)
@@ -386,12 +403,18 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	state.LastRunError = ""
 	state.LastRunUsage = runUsageStats{}
 	state.HasRunUsage = false
+	expectedSessionID := strings.TrimSpace(state.SessionID)
+	followUpRun := state.RanOnce
 	buildOpts := runBuildOptions{
 		AllowedTools: opts.AllowedTools,
 		Model:        opts.Model,
 	}
-	if strings.TrimSpace(state.SessionID) != "" {
-		buildOpts.SessionID = state.SessionID
+	if followUpRun {
+		if expectedSessionID == "" {
+			return fmt.Errorf("provider %s did not report a session id for the previous run; cannot guarantee continuity", l.provider.Name())
+		}
+		buildOpts.SessionID = expectedSessionID
+		buildOpts.ContinueSession = true
 	} else if opts.ContinueMode {
 		buildOpts.ContinueSession = true
 	}
@@ -404,7 +427,7 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 
 	l.printf("\n%s  %s  >  %s\n\n", header, l.now().Format("15:04:05"), truncateRunText(displayPrompt, 80))
 	l.println(formatRunProviderMode(l.provider, buildOpts))
-	l.println("type /wait, /stop, /quit, or start typing to queue a prompt.")
+	l.println("type /wait, /autofeed off, /stop, /quit, or start typing to queue a prompt.")
 	l.clearStatusLine()
 	l.renderInputPrompt(state)
 
@@ -412,6 +435,7 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	state.TextProbe = ""
 	state.SuppressText = false
 	state.StructuredOut = false
+	observedSessionID := ""
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -426,7 +450,7 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	}
 	go func() {
 		errCh <- l.runner(runCtx, opts.WorkingDir, argv, func(line string) {
-			l.handleOutputLine(line, presenter, state)
+			l.handleOutputLine(line, presenter, state, &observedSessionID)
 		}, stderrSink)
 	}()
 
@@ -444,6 +468,14 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 			state.RunInterrupted = false
 			if strings.TrimSpace(state.LastRunError) != "" {
 				return errors.New(state.LastRunError)
+			}
+			if followUpRun {
+				switch {
+				case strings.TrimSpace(observedSessionID) == "":
+					return fmt.Errorf("provider %s did not report a session id for follow-up run", l.provider.Name())
+				case observedSessionID != expectedSessionID:
+					return fmt.Errorf("provider %s switched sessions unexpectedly: expected %s, got %s", l.provider.Name(), expectedSessionID, observedSessionID)
+				}
 			}
 			return err
 		case event := <-l.controlEvents():
@@ -483,7 +515,7 @@ func (l *runLoop) drainPendingControlEvents(state *runState, activeRun bool) {
 	}
 }
 
-func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, state *runState) {
+func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, state *runState, observedSessionID *string) {
 	event, err := l.provider.ParseOutput(line)
 	if err != nil {
 		l.logf("provider parse fallback line=%q err=%v", truncateRunText(line, 120), err)
@@ -497,6 +529,9 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 
 	if sid := l.provider.SessionID(event); sid != "" {
 		state.SessionID = sid
+		if observedSessionID != nil {
+			*observedSessionID = sid
+		}
 	}
 	if event != nil && event.Usage != nil {
 		state.LastRunUsage = *event.Usage
@@ -636,7 +671,7 @@ func (l *runLoop) waitForNextCycle(ctx context.Context, waitSeconds int, state *
 		state.Paused = true
 		state.PauseAfterRun = false
 		if !state.PendingInput && !state.PauseNoticeShown {
-			l.println("paused. use /resume, /quit, or type a prompt to continue.")
+			l.println(runPausedNoticeText)
 			state.PauseNoticeShown = true
 		}
 		return l.waitWhilePaused(ctx, state)
@@ -650,7 +685,10 @@ func (l *runLoop) waitForWork(ctx context.Context, waitSeconds int, state *runSt
 }
 
 func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {
-	l.setStatusLine("paused: /resume, /quit, or type a prompt")
+	if state.ExitConfirmPending {
+		return l.waitForExitConfirmation(ctx, state)
+	}
+	l.setStatusLine(runPausedStatusText)
 	defer l.clearStatusLine()
 
 	for {
@@ -670,6 +708,12 @@ func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {
 			l.applyControlEvent(event, state, false, nil)
 			if state.StopRequested {
 				return context.Canceled
+			}
+			if state.ExitConfirmPending {
+				if err := l.waitForExitConfirmation(ctx, state); err != nil {
+					return err
+				}
+				continue
 			}
 			if strings.TrimSpace(state.NextPrompt) != "" {
 				state.Paused = false
@@ -700,9 +744,13 @@ func (l *runLoop) idleWithControlsLabel(ctx context.Context, seconds int, state 
 		select {
 		case event := <-l.controlEvents():
 			l.applyControlEvent(event, state, false, nil)
-			l.clearStatusLine()
 			if state.StopRequested {
 				return context.Canceled
+			}
+			if state.ExitConfirmPending {
+				if err := l.waitForExitConfirmation(ctx, state); err != nil {
+					return err
+				}
 			}
 			if strings.TrimSpace(state.NextPrompt) != "" {
 				return nil
@@ -732,8 +780,128 @@ func (l *runLoop) controlEvents() <-chan runControlEvent {
 	return l.control.Events()
 }
 
+func (l *runLoop) setExitConfirmation(active bool) {
+	if l.screen != nil {
+		l.screen.SetExitConfirmation(active)
+	}
+}
+
+func (l *runLoop) offerExit(state *runState) {
+	if state == nil {
+		return
+	}
+	state.ExitConfirmPending = true
+	l.setExitConfirmation(true)
+	l.setStatusLine(runExitStatusText)
+	if l.screen == nil {
+		l.println(runExitStatusText)
+	}
+}
+
+func (l *runLoop) cancelExitConfirmation(state *runState) {
+	if state == nil || !state.ExitConfirmPending {
+		return
+	}
+	state.ExitConfirmPending = false
+	l.setExitConfirmation(false)
+	if state.Paused {
+		l.setStatusLine(runPausedStatusText)
+		return
+	}
+	l.clearStatusLine()
+}
+
+func (l *runLoop) confirmExit(state *runState, activeRun bool, cancel context.CancelFunc) {
+	if state == nil {
+		return
+	}
+	state.PendingInput = false
+	state.InputBuffer = ""
+	state.StopRequested = true
+	state.Paused = false
+	state.PauseNoticeShown = false
+	state.PauseAfterRun = false
+	state.ExitConfirmPending = false
+	l.setExitConfirmation(false)
+	l.clearStatusLine()
+	l.renderInputPrompt(state)
+	if activeRun && cancel != nil {
+		l.println("\nquitting.")
+		cancel()
+	}
+}
+
+func (l *runLoop) clearPendingInput(state *runState) {
+	if state == nil {
+		return
+	}
+	state.PendingInput = false
+	state.InputBuffer = ""
+	if l.screen != nil {
+		l.screen.ClearInputLine()
+		return
+	}
+	l.renderInputPrompt(state)
+}
+
+func (l *runLoop) waitForExitConfirmation(ctx context.Context, state *runState) error {
+	if state == nil || !state.ExitConfirmPending {
+		return nil
+	}
+
+	l.setStatusLine(runExitStatusText)
+	for state.ExitConfirmPending && !state.StopRequested {
+		select {
+		case event := <-l.controlEvents():
+			l.applyControlEvent(event, state, false, nil)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if state.StopRequested {
+		return context.Canceled
+	}
+	return nil
+}
+
 func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, activeRun bool, cancel context.CancelFunc) {
 	l.logf("control event=%s active=%t text=%q", event.Type, activeRun, truncateRunText(strings.TrimSpace(event.Text), 120))
+
+	switch event.Type {
+	case runControlExitConfirm:
+		l.confirmExit(state, activeRun, cancel)
+		return
+	case runControlExitCancel:
+		l.cancelExitConfirmation(state)
+		l.renderInputPrompt(state)
+		return
+	case runControlInterrupt:
+		switch {
+		case state.ExitConfirmPending:
+			l.confirmExit(state, activeRun, cancel)
+		case state.PendingInput || state.InputBuffer != "":
+			l.clearPendingInput(state)
+		case activeRun && cancel != nil:
+			event = runControlEvent{Type: runControlStop}
+		default:
+			l.offerExit(state)
+			l.renderInputPrompt(state)
+			return
+		}
+	case runControlExitPrompt:
+		if state.ExitConfirmPending {
+			l.confirmExit(state, activeRun, cancel)
+			return
+		}
+		l.offerExit(state)
+		l.renderInputPrompt(state)
+		return
+	}
+
+	if state.ExitConfirmPending {
+		l.cancelExitConfirmation(state)
+	}
+
 	switch event.Type {
 	case runControlTypingStarted:
 		state.PendingInput = true
@@ -754,6 +922,10 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		state.NextPrompt = strings.TrimSpace(event.Text)
 		state.Paused = false
 		state.PauseNoticeShown = false
+		if state.AutofeedBeads {
+			state.AutofeedBeads = false
+			l.announceAutofeedState(false, "disabled for manual conversation. use /autofeed on to re-enable.")
+		}
 		if activeRun {
 			l.printf("\nqueued prompt override: %s\n", truncateRunText(state.NextPrompt, 80))
 		}
@@ -766,7 +938,7 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		if activeRun {
 			l.println("\nwill pause after this run.")
 		} else {
-			l.println("paused. use /resume, /quit, or type a prompt to continue.")
+			l.println(runPausedNoticeText)
 			state.PauseNoticeShown = true
 		}
 	case runControlResume:
@@ -777,6 +949,14 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		if activeRun {
 			state.PauseAfterRun = false
 		}
+		l.renderInputPrompt(state)
+	case runControlAutofeedOn:
+		state.AutofeedBeads = true
+		l.announceAutofeedState(true, "on. claimed and ready beads can wake the agent.")
+		l.renderInputPrompt(state)
+	case runControlAutofeedOff:
+		state.AutofeedBeads = false
+		l.announceAutofeedState(false, "off. only comms can wake the agent.")
 		l.renderInputPrompt(state)
 	case runControlQuit:
 		state.PendingInput = false
@@ -797,12 +977,12 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		state.PauseAfterRun = true
 		if activeRun && cancel != nil {
 			state.RunInterrupted = true
-			l.println("\nstopped current run. paused. use /resume, /quit, or type a prompt to continue.")
+			l.println("\nstopped current run. " + runPausedNoticeText)
 			state.PauseNoticeShown = true
 			cancel()
 			return
 		}
-		l.println("paused. use /resume, /quit, or type a prompt to continue.")
+		l.println(runPausedNoticeText)
 		state.PauseNoticeShown = true
 	}
 }
@@ -967,6 +1147,15 @@ func (l *runLoop) setStatusLine(text string) {
 	if l.screen != nil {
 		l.screen.SetStatusLine(text)
 	}
+}
+
+func (l *runLoop) announceAutofeedState(enabled bool, detail string) {
+	mode := "off"
+	if enabled {
+		mode = "on"
+	}
+	l.println("info: bead autofeed " + detail)
+	l.setStatusLine("bead autofeed " + mode)
 }
 
 func (l *runLoop) clearStatusLine() {

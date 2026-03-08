@@ -19,13 +19,14 @@ type runScreenManager struct {
 	outputFile  *os.File
 	promptLabel string
 
-	mu         sync.Mutex
-	lines      []string
-	current    string
-	statusLine string
-	inputLine  string
-	pending    bool
-	active     bool
+	mu          sync.Mutex
+	lines       []string
+	current     string
+	statusLine  string
+	inputLine   string
+	pending     bool
+	active      bool
+	exitConfirm bool
 
 	events  chan runControlEvent
 	program *tea.Program
@@ -38,11 +39,13 @@ type runScreenSnapshot struct {
 	StatusLine  string
 	InputLine   string
 	PromptLabel string
+	ExitConfirm bool
 }
 
 type runScreenAppendTextMsg string
 type runScreenSetStatusMsg string
 type runScreenSetInputMsg string
+type runScreenSetExitConfirmMsg bool
 type runScreenQuitMsg struct{}
 
 type runScreenModel struct {
@@ -51,6 +54,7 @@ type runScreenModel struct {
 	width       int
 	height      int
 	promptLabel string
+	exitConfirm bool
 
 	lines      []string
 	current    string
@@ -59,7 +63,10 @@ type runScreenModel struct {
 
 	onInputChanged func(string)
 	onSubmitted    func(string)
-	onStop         func()
+	onInterrupt    func()
+	onExitPrompt   func()
+	onExitConfirm  func()
+	onExitCancel   func()
 }
 
 type runScreenStyles struct {
@@ -107,7 +114,15 @@ func (s *runScreenManager) Start() error {
 	s.active = true
 	snapshot := s.snapshotLocked()
 	doneCh := make(chan error, 1)
-	model := newRunScreenModel(snapshot, s.handleInputChanged, s.handleInputSubmitted, s.handleStopRequested)
+	model := newRunScreenModel(
+		snapshot,
+		s.handleInputChanged,
+		s.handleInputSubmitted,
+		s.handleInterruptRequested,
+		s.handleExitPromptRequested,
+		s.handleExitConfirmed,
+		s.handleExitCanceled,
+	)
 	program := tea.NewProgram(
 		model,
 		tea.WithInput(s.inputFile),
@@ -253,6 +268,7 @@ func (s *runScreenManager) snapshotLocked() runScreenSnapshot {
 		StatusLine:  s.statusLine,
 		InputLine:   s.inputLine,
 		PromptLabel: s.promptLabel,
+		ExitConfirm: s.exitConfirm,
 	}
 }
 
@@ -289,15 +305,45 @@ func (s *runScreenManager) handleInputSubmitted(value string) {
 	s.emit(parseRunControlSubmission(value))
 }
 
-func (s *runScreenManager) handleStopRequested() {
-	s.emit(runControlEvent{Type: runControlStop})
+func (s *runScreenManager) handleInterruptRequested() {
+	s.emit(runControlEvent{Type: runControlInterrupt})
+}
+
+func (s *runScreenManager) handleExitPromptRequested() {
+	s.emit(runControlEvent{Type: runControlExitPrompt})
+}
+
+func (s *runScreenManager) handleExitConfirmed() {
+	s.emit(runControlEvent{Type: runControlExitConfirm})
+}
+
+func (s *runScreenManager) handleExitCanceled() {
+	s.emit(runControlEvent{Type: runControlExitCancel})
+}
+
+func (s *runScreenManager) SetExitConfirmation(active bool) {
+	if s == nil {
+		return
+	}
+
+	s.mu.Lock()
+	s.exitConfirm = active
+	program := s.program
+	s.mu.Unlock()
+
+	if program != nil {
+		program.Send(runScreenSetExitConfirmMsg(active))
+	}
 }
 
 func newRunScreenModel(
 	snapshot runScreenSnapshot,
 	onInputChanged func(string),
 	onSubmitted func(string),
-	onStop func(),
+	onInterrupt func(),
+	onExitPrompt func(),
+	onExitConfirm func(),
+	onExitCancel func(),
 ) runScreenModel {
 	input := textarea.New()
 	input.Prompt = snapshot.PromptLabel
@@ -322,13 +368,17 @@ func newRunScreenModel(
 		viewport:       viewport.New(0, 0),
 		input:          input,
 		promptLabel:    snapshot.PromptLabel,
+		exitConfirm:    snapshot.ExitConfirm,
 		lines:          snapshot.Lines,
 		current:        snapshot.Current,
 		statusLine:     snapshot.StatusLine,
 		styles:         newRunScreenStyles(),
 		onInputChanged: onInputChanged,
 		onSubmitted:    onSubmitted,
-		onStop:         onStop,
+		onInterrupt:    onInterrupt,
+		onExitPrompt:   onExitPrompt,
+		onExitConfirm:  onExitConfirm,
+		onExitCancel:   onExitCancel,
 	}
 	model.syncViewport(true)
 	return model
@@ -374,13 +424,62 @@ func (m runScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncLayout()
 		}
 		return m, nil
+	case runScreenSetExitConfirmMsg:
+		m.exitConfirm = bool(typed)
+		return m, nil
 	case runScreenQuitMsg:
 		return m, tea.Quit
 	case tea.KeyMsg:
+		if m.exitConfirm {
+			switch typed.Type {
+			case tea.KeyCtrlC, tea.KeyCtrlD:
+				if m.onExitConfirm != nil {
+					m.onExitConfirm()
+				}
+				return m, nil
+			case tea.KeyEsc:
+				m.exitConfirm = false
+				if m.onExitCancel != nil {
+					m.onExitCancel()
+				}
+				return m, nil
+			case tea.KeyRunes:
+				if len(typed.Runes) == 1 {
+					switch typed.Runes[0] {
+					case 'y', 'Y':
+						if m.onExitConfirm != nil {
+							m.onExitConfirm()
+						}
+						return m, nil
+					case 'n', 'N':
+						m.exitConfirm = false
+						if m.onExitCancel != nil {
+							m.onExitCancel()
+						}
+						return m, nil
+					}
+				}
+				m.exitConfirm = false
+				if m.onExitCancel != nil {
+					m.onExitCancel()
+				}
+			default:
+				m.exitConfirm = false
+				if m.onExitCancel != nil {
+					m.onExitCancel()
+				}
+			}
+		}
+
 		switch typed.Type {
 		case tea.KeyCtrlC:
-			if m.onStop != nil {
-				m.onStop()
+			if m.onInterrupt != nil {
+				m.onInterrupt()
+			}
+			return m, nil
+		case tea.KeyCtrlD:
+			if m.onExitPrompt != nil {
+				m.onExitPrompt()
 			}
 			return m, nil
 		case tea.KeyEnter:
@@ -652,7 +751,7 @@ func styleRunScreenLine(line string, styles runScreenStyles) string {
 	case "run_header":
 		return styles.runHeader.Render(line)
 	case "tool":
-		return styles.tool.Render(line)
+		return styleRunScreenToolLine(line, styles)
 	case "result":
 		return styles.result.Render(line)
 	case "done":
@@ -662,8 +761,25 @@ func styleRunScreenLine(line string, styles runScreenStyles) string {
 	case "hint":
 		return styles.hint.Render(line)
 	default:
+		return styleRunScreenToolClosingParen(line, styles)
+	}
+}
+
+func styleRunScreenToolLine(line string, styles runScreenStyles) string {
+	idx := strings.Index(line, "(")
+	if idx < 0 {
+		return styles.tool.Render(line)
+	}
+	return styles.tool.Render(line[:idx+1]) + styleRunScreenToolClosingParen(line[idx+1:], styles)
+}
+
+func styleRunScreenToolClosingParen(line string, styles runScreenStyles) string {
+	trimmed := strings.TrimRight(line, " ")
+	if trimmed == "" || !strings.HasSuffix(trimmed, ")") {
 		return line
 	}
+	suffixStart := len(trimmed) - 1
+	return line[:suffixStart] + styles.tool.Render(")") + line[len(trimmed):]
 }
 
 func runScreenLineStyleKind(line string) string {
@@ -679,7 +795,7 @@ func runScreenLineStyleKind(line string) string {
 		return "done"
 	case strings.HasPrefix(trimmed, "info:"):
 		return "info"
-	case strings.HasPrefix(trimmed, "type /wait"):
+	case strings.HasPrefix(trimmed, "type /"):
 		return "hint"
 	default:
 		return "plain"
