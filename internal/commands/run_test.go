@@ -629,6 +629,24 @@ func TestApplyControlEventInterruptClearsPendingInput(t *testing.T) {
 	}
 }
 
+func TestApplyControlEventInterruptClearsActiveScreenInput(t *testing.T) {
+	screen := &runScreenManager{
+		promptLabel: defaultRunInputPromptLabel,
+		inputLine:   defaultRunInputPromptLabel + "draft",
+	}
+	loop := &runLoop{screen: screen}
+	state := &runState{
+		PendingInput: true,
+		InputBuffer:  "draft",
+	}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlInterrupt}, state, false, nil)
+
+	if screen.inputLine != defaultRunInputPromptLabel {
+		t.Fatalf("expected active screen input to clear, got %q", screen.inputLine)
+	}
+}
+
 func TestApplyControlEventInterruptStopsActiveRunWithoutInput(t *testing.T) {
 	loop := &runLoop{out: io.Discard}
 	state := &runState{}

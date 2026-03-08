@@ -818,6 +818,10 @@ func (l *runLoop) clearPendingInput(state *runState) {
 	}
 	state.PendingInput = false
 	state.InputBuffer = ""
+	if l.screen != nil {
+		l.screen.ClearInputLine()
+		return
+	}
 	l.renderInputPrompt(state)
 }
 
