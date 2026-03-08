@@ -788,7 +788,6 @@ func (l *runLoop) waitForWorkEvents(ctx context.Context, waitSeconds int, state 
 	deadline := l.now().Add(time.Duration(waitSeconds) * time.Second)
 	events, errs := l.wakeStream.Stream(ctx, deadline)
 	l.setStatusLine("waiting for work")
-	defer l.clearStatusLine()
 
 	for {
 		select {
@@ -931,7 +930,6 @@ func (l *runLoop) idleWithControlsLabel(ctx context.Context, seconds int, state 
 	if seconds <= 0 {
 		return nil
 	}
-	defer l.clearStatusLine()
 
 	for remaining := seconds; remaining > 0; remaining-- {
 		l.renderIdleLine(label, remaining, state)
