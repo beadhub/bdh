@@ -41,6 +41,7 @@ type runLoopOptions struct {
 	Prompt              string
 	WaitSeconds         int
 	MaxRuns             int
+	AutofeedBeads       bool
 	ContinueMode        bool
 	WorkingDir          string
 	AllowedTools        string
@@ -66,6 +67,7 @@ type runState struct {
 	PauseNoticeShown   bool
 	StopRequested      bool
 	Paused             bool
+	AutofeedBeads      bool
 	ExitConfirmPending bool
 	NextPrompt         string
 	PendingInput       bool
@@ -85,21 +87,21 @@ const (
 )
 
 var (
-	runWaitSeconds  int
-	runContinueMode bool
-	runMaxRuns      int
-	runIdleWait     int
-	runBasePrompt   string
-	runWorkPrompt   string
-	runCommsPrompt  string
-	runWorkingDir   string
-	runAllowedTools string
-	runModel        string
-	runCompactPct   int
-	runProviderName string
-	runIgnoreBeads  bool
-	runInitConfig   bool
-	runDebugMode    bool
+	runWaitSeconds   int
+	runContinueMode  bool
+	runMaxRuns       int
+	runIdleWait      int
+	runBasePrompt    string
+	runWorkPrompt    string
+	runCommsPrompt   string
+	runWorkingDir    string
+	runAllowedTools  string
+	runModel         string
+	runCompactPct    int
+	runProviderName  string
+	runAutofeedBeads bool
+	runInitConfig    bool
+	runDebugMode     bool
 )
 
 var runCmd = &cobra.Command{
@@ -111,7 +113,7 @@ Current implementation includes:
   - repeated provider invocations (currently Claude and Codex)
   - stream-json parsing and formatted output
   - provider session continuity when --continue is requested
-  - /stop, /wait, /resume, /quit, and prompt override controls
+  - /stop, /wait, /resume, /autofeed on|off, /quit, and prompt override controls
   - bdh-driven dispatch between runs (chat, mail, claims, ready work)
   - adaptive wait behavior based on dispatch priority
 
@@ -149,7 +151,6 @@ Future provider work will add more backends on top of the same loop.`,
 
 		dispatchDefaults := runDispatchDefaults{
 			IdleWaitSeconds:      settings.IdleWaitSeconds,
-			IgnoreBeads:          runIgnoreBeads,
 			WorkPromptSuffix:     settings.WorkPromptSuffix,
 			CommsPromptSuffix:    settings.CommsPromptSuffix,
 			HasWorkPromptSuffix:  true,
@@ -193,6 +194,7 @@ Future provider work will add more backends on top of the same loop.`,
 			Prompt:              settings.BasePrompt,
 			WaitSeconds:         settings.WaitSeconds,
 			MaxRuns:             runMaxRuns,
+			AutofeedBeads:       runAutofeedBeads,
 			ContinueMode:        runContinueMode,
 			WorkingDir:          runWorkingDir,
 			AllowedTools:        runAllowedTools,
@@ -225,7 +227,7 @@ func init() {
 	runCmd.Flags().StringVar(&runAllowedTools, "allowed-tools", "", "Provider-specific allowed tools string")
 	runCmd.Flags().StringVar(&runModel, "model", "", "Provider-specific model override")
 	runCmd.Flags().StringVar(&runProviderName, "provider", "claude", "Agent provider to run")
-	runCmd.Flags().BoolVar(&runIgnoreBeads, "ignore-beads", false, "Ignore claims and ready beads; only wake for incoming chat or unread mail")
+	runCmd.Flags().BoolVar(&runAutofeedBeads, "autofeed-beads", false, "Wake for claimed or ready beads in addition to incoming comms")
 	runCmd.Flags().BoolVar(&runInitConfig, "init", false, "Prompt for ~/.config/beadhub/run.json values and write them")
 	runCmd.Flags().BoolVar(&runDebugMode, "debug", false, "Enable detailed bdh :run debug logging (or set BDH_RUN_DEBUG=1)")
 }
@@ -252,7 +254,7 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 		}
 	}
 
-	state := &runState{}
+	state := &runState{AutofeedBeads: opts.AutofeedBeads}
 	logs, err := newRunLogSession(opts.WorkingDir, opts.Debug, l.now())
 	if err != nil {
 		return err
@@ -369,7 +371,7 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 		}, nil
 	}
 	if l.dispatch != nil {
-		decision, err := l.dispatch.Next(ctx)
+		decision, err := l.dispatch.Next(ctx, state.AutofeedBeads)
 		if err != nil {
 			l.logf("dispatch error: %v", err)
 			l.printf("info: dispatch failed: %v\n", err)
@@ -425,7 +427,7 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 
 	l.printf("\n%s  %s  >  %s\n\n", header, l.now().Format("15:04:05"), truncateRunText(displayPrompt, 80))
 	l.println(formatRunProviderMode(l.provider, buildOpts))
-	l.println("type /wait, /stop, /quit, or start typing to queue a prompt.")
+	l.println("type /wait, /autofeed off, /stop, /quit, or start typing to queue a prompt.")
 	l.clearStatusLine()
 	l.renderInputPrompt(state)
 
@@ -921,6 +923,10 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		state.NextPrompt = strings.TrimSpace(event.Text)
 		state.Paused = false
 		state.PauseNoticeShown = false
+		if state.AutofeedBeads {
+			state.AutofeedBeads = false
+			l.println("info: bead autofeed disabled for manual conversation. use /autofeed on to re-enable.")
+		}
 		if activeRun {
 			l.printf("\nqueued prompt override: %s\n", truncateRunText(state.NextPrompt, 80))
 		}
@@ -944,6 +950,14 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		if activeRun {
 			state.PauseAfterRun = false
 		}
+		l.renderInputPrompt(state)
+	case runControlAutofeedOn:
+		state.AutofeedBeads = true
+		l.println("info: bead autofeed on. claimed and ready beads can wake the agent.")
+		l.renderInputPrompt(state)
+	case runControlAutofeedOff:
+		state.AutofeedBeads = false
+		l.println("info: bead autofeed off. only comms can wake the agent.")
 		l.renderInputPrompt(state)
 	case runControlQuit:
 		state.PendingInput = false

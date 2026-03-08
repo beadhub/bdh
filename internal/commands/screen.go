@@ -795,7 +795,7 @@ func runScreenLineStyleKind(line string) string {
 		return "done"
 	case strings.HasPrefix(trimmed, "info:"):
 		return "info"
-	case strings.HasPrefix(trimmed, "type /wait"):
+	case strings.HasPrefix(trimmed, "type /"):
 		return "hint"
 	default:
 		return "plain"

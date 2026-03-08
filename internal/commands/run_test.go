@@ -1106,6 +1106,94 @@ func TestRunLoopPromptOverrideBypassesDispatchCyclePrompt(t *testing.T) {
 	}
 }
 
+func TestRunLoopManualPromptTurnsAutofeedOffForLaterDispatches(t *testing.T) {
+	controller := newFakeRunInputController()
+	firstRunStarted := make(chan struct{})
+	releaseFirstRun := make(chan struct{})
+	var commands [][]string
+	var output strings.Builder
+	var mu sync.Mutex
+	runCount := 0
+
+	dispatcher := &fakeRunDispatcher{
+		decisions: []runDispatchDecision{
+			{Prompt: "Continue working on bdh-421.3: Dispatch logic.", WaitSeconds: 0},
+			{Prompt: "Respond to chat from mia.", WaitSeconds: 0},
+		},
+	}
+
+	loop := &runLoop{
+		provider: claudeProvider{},
+		now:      time.Now,
+		out:      &output,
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		control:  controller,
+		dispatch: dispatcher,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
+			mu.Lock()
+			runCount++
+			currentRun := runCount
+			commands = append(commands, append([]string(nil), argv...))
+			mu.Unlock()
+
+			if currentRun == 1 {
+				close(firstRunStarted)
+				<-releaseFirstRun
+			}
+
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
+			return nil
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- loop.Run(context.Background(), runLoopOptions{
+			Prompt:        "persistent mission",
+			WaitSeconds:   0,
+			MaxRuns:       3,
+			AutofeedBeads: true,
+		})
+	}()
+
+	select {
+	case <-firstRunStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for first run")
+	}
+
+	controller.send(runControlEvent{Type: runControlPrompt, Text: "manual follow-up"})
+	close(releaseFirstRun)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("timed out waiting for loop to finish")
+	}
+
+	if len(dispatcher.autofeedStates) != 2 {
+		t.Fatalf("expected 2 dispatch cycles, got %d", len(dispatcher.autofeedStates))
+	}
+	if !dispatcher.autofeedStates[0] {
+		t.Fatal("expected first dispatch cycle to run with autofeed on")
+	}
+	if dispatcher.autofeedStates[1] {
+		t.Fatal("expected manual prompt to disable autofeed for the next dispatch cycle")
+	}
+	if len(commands) != 3 {
+		t.Fatalf("expected 3 runs, got %d", len(commands))
+	}
+	if !containsText(joinArgs(commands[1]), "manual follow-up") {
+		t.Fatalf("expected second run to use manual prompt, got %q", joinArgs(commands[1]))
+	}
+	if !containsText(output.String(), "info: bead autofeed disabled for manual conversation") {
+		t.Fatalf("expected autofeed disable notice, got %q", output.String())
+	}
+}
+
 func TestRunLoopInitialPromptForcesRunWhenDispatchWouldSkip(t *testing.T) {
 	dispatcher := &fakeRunDispatcher{
 		decisions: []runDispatchDecision{
@@ -1140,6 +1228,30 @@ func TestRunLoopInitialPromptForcesRunWhenDispatchWouldSkip(t *testing.T) {
 	}
 	if !containsText(joinArgs(commands[0]), "are we ready to release") {
 		t.Fatalf("expected initial prompt in forced run, got %q", joinArgs(commands[0]))
+	}
+}
+
+func TestApplyControlEventAutofeedCommandsToggleState(t *testing.T) {
+	var output strings.Builder
+	loop := &runLoop{out: &output}
+	state := &runState{}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlAutofeedOn}, state, false, nil)
+	if !state.AutofeedBeads {
+		t.Fatal("expected /autofeed on to enable autofeed")
+	}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlAutofeedOff}, state, false, nil)
+	if state.AutofeedBeads {
+		t.Fatal("expected /autofeed off to disable autofeed")
+	}
+
+	text := output.String()
+	if !containsText(text, "info: bead autofeed on") {
+		t.Fatalf("expected autofeed-on notice, got %q", text)
+	}
+	if !containsText(text, "info: bead autofeed off") {
+		t.Fatalf("expected autofeed-off notice, got %q", text)
 	}
 }
 
@@ -1451,12 +1563,12 @@ func TestApplyControlEvent_BufferUpdatedRendersInputPrompt(t *testing.T) {
 	loop := &runLoop{out: &output}
 	state := &runState{Paused: true}
 
-	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: "/wait"}, state, false, nil)
+	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: "/autofeed on"}, state, false, nil)
 
-	if state.InputBuffer != "/wait" {
+	if state.InputBuffer != "/autofeed on" {
 		t.Fatalf("expected input buffer to update, got %q", state.InputBuffer)
 	}
-	if !containsText(output.String(), defaultRunInputPromptLabel+"/wait") {
+	if !containsText(output.String(), defaultRunInputPromptLabel+"/autofeed on") {
 		t.Fatalf("expected rendered input prompt, got %q", output.String())
 	}
 }
@@ -1466,9 +1578,9 @@ func TestApplyControlEvent_BufferUpdatedRendersInputPromptOnScreen(t *testing.T)
 	loop := &runLoop{screen: screen}
 	state := &runState{Paused: true}
 
-	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: "/wait"}, state, false, nil)
+	loop.applyControlEvent(runControlEvent{Type: runControlBufferUpdated, Text: "/autofeed on"}, state, false, nil)
 
-	if screen.inputLine != defaultRunInputPromptLabel+"/wait" {
+	if screen.inputLine != defaultRunInputPromptLabel+"/autofeed on" {
 		t.Fatalf("expected screen input line, got %q", screen.inputLine)
 	}
 }

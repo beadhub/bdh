@@ -36,7 +36,7 @@ func TestStyleRunScreenLineCategories(t *testing.T) {
 		{line: "  -> ok", want: "result"},
 		{line: "done  2.1s", want: "done"},
 		{line: "info: session", want: "info"},
-		{line: "type /wait, /stop", want: "hint"},
+		{line: "type /wait, /autofeed off, /stop", want: "hint"},
 		{line: "plain text", want: "plain"},
 	}
 
@@ -75,6 +75,8 @@ func TestParseRunControlSubmission(t *testing.T) {
 		{input: "/stop", want: runControlStop},
 		{input: "/wait", want: runControlWait},
 		{input: "/resume", want: runControlResume},
+		{input: "/autofeed on", want: runControlAutofeedOn},
+		{input: "/autofeed off", want: runControlAutofeedOff},
 		{input: "fix the bug", want: runControlPrompt},
 	}
 
