@@ -44,6 +44,7 @@ type runScreenAppendTextMsg string
 type runScreenSetStatusMsg string
 type runScreenSetInputMsg string
 type runScreenQuitMsg struct{}
+type runScreenTextareaLayoutMsg struct{}
 
 type runScreenModel struct {
 	viewport    viewport.Model
@@ -423,6 +424,8 @@ func (m *runScreenModel) syncLayout() {
 		return
 	}
 
+	prevWidth := m.input.Width()
+	prevHeight := m.input.Height()
 	m.input.SetWidth(m.width)
 	inputHeight := runInputVisualHeight(m.promptLabel, m.input.Value(), m.width)
 	maxInputHeight := max(1, m.height-runScreenFooterBaseLines-1)
@@ -430,6 +433,12 @@ func (m *runScreenModel) syncLayout() {
 		inputHeight = maxInputHeight
 	}
 	m.input.SetHeight(inputHeight)
+	if m.input.Width() != prevWidth || m.input.Height() != prevHeight {
+		// textarea repositions its internal viewport during Update, but not when
+		// width/height are adjusted directly. Trigger a no-op update so wrapped
+		// input stays anchored to the bottom without scrolling away earlier lines.
+		m.input, _ = m.input.Update(runScreenTextareaLayoutMsg{})
+	}
 
 	outputHeight := m.height - (runScreenFooterBaseLines + inputHeight)
 	if outputHeight < 1 {
