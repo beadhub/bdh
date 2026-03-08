@@ -19,11 +19,15 @@ import (
 
 type runCommandRunner func(ctx context.Context, dir string, argv []string, onLine func(string), stderrSink io.Writer) error
 type runSleepFunc func(ctx context.Context, d time.Duration) error
+type runWakeStream interface {
+	Stream(ctx context.Context, deadline time.Time) (<-chan runWakeEvent, <-chan error)
+}
 
 type runLoop struct {
 	provider          runProvider
 	runner            runCommandRunner
 	sleep             runSleepFunc
+	wakeStream        runWakeStream
 	serviceSupervisor runServiceSupervisor
 	now               func() time.Time
 	out               io.Writer
@@ -158,12 +162,16 @@ Future provider work will add more backends on top of the same loop.`,
 		}
 
 		var dispatcher runDispatcher
+		var wakeStream runWakeStream
 		inputPromptLabel := defaultRunInputPromptLabel
 		cfg, cfgErr := loadAndValidateConfig()
 		if cfgErr == nil {
 			inputPromptLabel = runIdentityPromptLabel(cfg.ProjectSlug, cfg.CanonicalOrigin, cfg.RepoOrigin, cfg.Alias)
 			if aw, awErr := newAwebClientRequired(cfg.BeadhubURL); awErr == nil {
 				dispatcher = newBeadhubRunDispatcher(cfg, aw, dispatchDefaults)
+			}
+			if stream, streamErr := newRunEventStreamClient(cfg.BeadhubURL); streamErr == nil {
+				wakeStream = stream
 			}
 		}
 
@@ -180,6 +188,7 @@ Future provider work will add more backends on top of the same loop.`,
 			provider:         provider,
 			runner:           realRunCommand,
 			sleep:            sleepWithContext,
+			wakeStream:       wakeStream,
 			now:              time.Now,
 			out:              cmd.OutOrStdout(),
 			control:          screen,
@@ -681,7 +690,115 @@ func (l *runLoop) waitForNextCycle(ctx context.Context, waitSeconds int, state *
 }
 
 func (l *runLoop) waitForWork(ctx context.Context, waitSeconds int, state *runState) error {
+	if l.wakeStream != nil {
+		return l.waitForWorkEvents(ctx, waitSeconds, state)
+	}
 	return l.idleWithControlsLabel(ctx, waitSeconds, state, "waiting for work")
+}
+
+func (l *runLoop) waitForWorkEvents(ctx context.Context, waitSeconds int, state *runState) error {
+	if waitSeconds <= 0 {
+		return nil
+	}
+	if state.StopRequested {
+		return context.Canceled
+	}
+	if strings.TrimSpace(state.NextPrompt) != "" {
+		return nil
+	}
+
+	deadline := l.now().Add(time.Duration(waitSeconds) * time.Second)
+	events, errs := l.wakeStream.Stream(ctx, deadline)
+	l.setStatusLine("waiting for work")
+	defer l.clearStatusLine()
+
+	for {
+		select {
+		case event := <-l.controlEvents():
+			l.applyControlEvent(event, state, false, nil)
+			if state.StopRequested {
+				return context.Canceled
+			}
+			if state.ExitConfirmPending {
+				if err := l.waitForExitConfirmation(ctx, state); err != nil {
+					return err
+				}
+			}
+			if strings.TrimSpace(state.NextPrompt) != "" {
+				return nil
+			}
+			if state.Paused {
+				return l.waitWhilePaused(ctx, state)
+			}
+		case evt, ok := <-events:
+			if !ok {
+				events = nil
+				if errs == nil {
+					return nil
+				}
+				continue
+			}
+			if !l.shouldWakeForEvent(evt, state) {
+				l.logf("wake event ignored type=%s autofeed=%t", evt.Type, state.AutofeedBeads)
+				continue
+			}
+			l.logf("wake event type=%s task=%s from=%s", evt.Type, evt.TaskID, evt.FromAlias)
+			if l.handleImmediateWakeEvent(ctx, evt, state) {
+				return nil
+			}
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				if events == nil {
+					return nil
+				}
+				continue
+			}
+			if err == nil || ctx.Err() != nil {
+				return nil
+			}
+			l.logf("event stream wait failed: %v", err)
+			l.println(fmt.Sprintf("info: event stream failed: %v", err))
+			return l.idleWithControlsLabel(ctx, waitSeconds, state, "waiting for work")
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (l *runLoop) shouldWakeForEvent(evt runWakeEvent, state *runState) bool {
+	switch evt.Type {
+	case runWakeEventConnected:
+		return false
+	case runWakeEventMailMessage, runWakeEventChatMessage:
+		return true
+	case runWakeEventWorkAvailable, runWakeEventClaimUpdate, runWakeEventClaimRemoved:
+		return state != nil && state.AutofeedBeads
+	case runWakeEventControlPause, runWakeEventControlResume, runWakeEventControlInterrupt:
+		return true
+	case runWakeEventError:
+		return false
+	default:
+		return false
+	}
+}
+
+func (l *runLoop) handleImmediateWakeEvent(ctx context.Context, evt runWakeEvent, state *runState) bool {
+	switch evt.Type {
+	case runWakeEventControlPause, runWakeEventControlInterrupt:
+		state.Paused = true
+		state.PauseAfterRun = false
+		state.PauseNoticeShown = true
+		l.println(runPausedNoticeText)
+		_ = l.waitWhilePaused(ctx, state)
+		return true
+	case runWakeEventControlResume:
+		state.Paused = false
+		state.PauseNoticeShown = false
+		return true
+	default:
+		return true
+	}
 }
 
 func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {

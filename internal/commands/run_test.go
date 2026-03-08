@@ -18,8 +18,20 @@ type fakeRunInputController struct {
 	pending bool
 }
 
+type fakeRunWakeStream struct {
+	events chan runWakeEvent
+	errs   chan error
+}
+
 func newFakeRunInputController() *fakeRunInputController {
 	return &fakeRunInputController{events: make(chan runControlEvent, 32)}
+}
+
+func newFakeRunWakeStream() *fakeRunWakeStream {
+	return &fakeRunWakeStream{
+		events: make(chan runWakeEvent, 32),
+		errs:   make(chan error, 8),
+	}
 }
 
 func (f *fakeRunInputController) Start() error                   { return nil }
@@ -37,6 +49,10 @@ func (f *fakeRunInputController) setPending(pending bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pending = pending
+}
+
+func (f *fakeRunWakeStream) Stream(context.Context, time.Time) (<-chan runWakeEvent, <-chan error) {
+	return f.events, f.errs
 }
 
 func TestRunLoopStartsFreshThenKeepsExactSessionWithoutContinueMode(t *testing.T) {
@@ -406,6 +422,60 @@ func TestRunLoopIdleCountdown(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "next run in 2s") {
 		t.Fatalf("expected countdown output, got: %q", output.String())
+	}
+}
+
+func TestWaitForWorkWakesOnEventStreamChatMessage(t *testing.T) {
+	stream := newFakeRunWakeStream()
+	var slept []time.Duration
+
+	loop := &runLoop{
+		out:        io.Discard,
+		wakeStream: stream,
+		now:        time.Now,
+		sleep: func(_ context.Context, d time.Duration) error {
+			slept = append(slept, d)
+			return nil
+		},
+	}
+	state := &runState{}
+
+	stream.events <- runWakeEvent{Type: runWakeEventChatMessage, FromAlias: "mia"}
+	close(stream.events)
+	close(stream.errs)
+
+	if err := loop.waitForWork(context.Background(), 30, state); err != nil {
+		t.Fatalf("waitForWork returned error: %v", err)
+	}
+	if len(slept) != 0 {
+		t.Fatalf("expected event-driven wakeup without sleep fallback, got %d sleep calls", len(slept))
+	}
+}
+
+func TestWaitForWorkFallsBackToCountdownWhenStreamFails(t *testing.T) {
+	stream := newFakeRunWakeStream()
+	var slept []time.Duration
+
+	loop := &runLoop{
+		out:        io.Discard,
+		wakeStream: stream,
+		now:        time.Now,
+		sleep: func(_ context.Context, d time.Duration) error {
+			slept = append(slept, d)
+			return nil
+		},
+	}
+	state := &runState{}
+
+	stream.errs <- errors.New("boom")
+	close(stream.events)
+	close(stream.errs)
+
+	if err := loop.waitForWork(context.Background(), 2, state); err != nil {
+		t.Fatalf("waitForWork returned error: %v", err)
+	}
+	if len(slept) != 2 {
+		t.Fatalf("expected countdown fallback to sleep twice, got %d", len(slept))
 	}
 }
 
