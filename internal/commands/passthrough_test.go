@@ -31,6 +31,14 @@ func setupBeadsDir(t *testing.T) {
 	beads.ResetCache()
 }
 
+func setupBeadsDirWithoutDB(t *testing.T) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(".", ".beads"), 0755); err != nil {
+		t.Fatalf("setup .beads dir: %v", err)
+	}
+	beads.ResetCache()
+}
+
 func TestPassthrough_PreservesArgsWhenInvokingBd(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses a sh stub for bd")
@@ -124,6 +132,97 @@ func TestPassthrough_PreservesArgsWhenInvokingBd(t *testing.T) {
 	wantCommandLine := strings.Join(wantForwarded, " ")
 	if gotCommandLine != wantCommandLine {
 		t.Fatalf("server command_line mismatch: got=%q want=%q", gotCommandLine, wantCommandLine)
+	}
+}
+
+func TestPassthrough_PrefersLocalBdModeWhenBeadsDirExistsWithoutDatabase(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a sh stub for bd")
+	}
+
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+	os.Chdir(tmpDir)
+
+	setupBeadsDirWithoutDB(t)
+
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	bdPath := filepath.Join(binDir, "bd")
+	script := "#!/bin/sh\nprintf 'local bd mode\\n'\nprintf '%s\\n' \"$@\"\n"
+	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/bdh/command":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"approved": true,
+				"context": map[string]any{
+					"messages_waiting":  0,
+					"beads_in_progress": []any{},
+				},
+			})
+			return
+		case "/v1/chat/pending":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"pending":          []any{},
+				"messages_waiting": 0,
+			})
+			return
+		case "/v1/messages/inbox":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"messages": []any{},
+				"count":    0,
+			})
+			return
+		case "/v1/workspaces/team":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"workspaces": []any{},
+				"count":      0,
+			})
+			return
+		case "/v1/reservations":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"reservations": []any{},
+				"count":        0,
+			})
+			return
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+		BeadhubURL:      server.URL,
+		ProjectSlug:     "test-project",
+		RepoID:          "c3d4e5f6-7890-12cd-ef01-345678901234",
+		RepoOrigin:      "git@github.com:test/repo.git",
+		CanonicalOrigin: "github.com/test/repo",
+		Alias:           "test-agent",
+		HumanName:       "Test Human",
+	}
+	cfg.Save()
+
+	result, err := runPassthrough([]string{"update", "beadhub-009", "--status", "in_progress"})
+	if err != nil {
+		t.Fatalf("runPassthrough update claim: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "local bd mode") {
+		t.Fatalf("expected local bd stub output, got %q", result.Stdout)
+	}
+	if !strings.Contains(result.Stdout, "update\nbeadhub-009\n--status\nin_progress\n") {
+		t.Fatalf("expected claim/update args to be forwarded to bd, got %q", result.Stdout)
 	}
 }
 
