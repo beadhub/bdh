@@ -744,7 +744,6 @@ func (l *runLoop) idleWithControlsLabel(ctx context.Context, seconds int, state 
 		select {
 		case event := <-l.controlEvents():
 			l.applyControlEvent(event, state, false, nil)
-			l.clearStatusLine()
 			if state.StopRequested {
 				return context.Canceled
 			}
