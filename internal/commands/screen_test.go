@@ -3,6 +3,9 @@ package commands
 import (
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestAppendRunScreenTextTracksCompleteAndPartialLines(t *testing.T) {
@@ -189,5 +192,40 @@ func TestRunScreenViewGrowsInputFooterWhenInputWraps(t *testing.T) {
 	}
 	if !strings.Contains(view, "beadhub:bdh:noah> ") {
 		t.Fatalf("expected prompt label in view, got %q", view)
+	}
+}
+
+func TestRunScreenViewKeepsFirstWrappedInputLineVisibleDuringTyping(t *testing.T) {
+	model := newRunScreenModel(
+		runScreenSnapshot{
+			StatusLine:  "paused: /resume, /quit, or type a prompt",
+			InputLine:   "beadhub:bdh:noah> ",
+			PromptLabel: "beadhub:bdh:noah> ",
+		},
+		nil,
+		nil,
+		nil,
+	)
+	model.width = 30
+	model.height = 10
+	model.syncLayout()
+
+	for range 15 {
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		model = updated.(runScreenModel)
+	}
+
+	if model.input.Height() < 2 {
+		t.Fatalf("expected wrapped input height, got %d", model.input.Height())
+	}
+
+	view := model.View()
+	if !strings.Contains(view, "beadhub:bdh:noah> xxxxxxxxxxxx") {
+		t.Fatalf("expected first wrapped line to remain visible, got %q", view)
+	}
+
+	continuation := "\n" + strings.Repeat(" ", lipgloss.Width(model.promptLabel)) + "xxx"
+	if !strings.Contains(view, continuation) {
+		t.Fatalf("expected wrapped continuation line to remain visible, got %q", view)
 	}
 }

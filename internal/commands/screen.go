@@ -397,9 +397,13 @@ func (m runScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		previous := m.input.Value()
+		previousHeight := m.input.Height()
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(typed)
 		m.syncLayout()
+		if m.input.Height() > previousHeight {
+			m.restoreWrappedInputViewport()
+		}
 		if m.input.Value() != previous && m.onInputChanged != nil {
 			m.onInputChanged(m.input.Value())
 		}
@@ -447,6 +451,13 @@ func (m *runScreenModel) syncViewport(autoBottom bool) {
 	if autoBottom {
 		m.viewport.GotoBottom()
 	}
+}
+
+func (m *runScreenModel) restoreWrappedInputViewport() {
+	value := m.input.Value()
+	cursorCol := runInputCursorColumn(m.input)
+	m.input.SetValue(value)
+	m.input.SetCursor(cursorCol)
 }
 
 func (m runScreenModel) formattedOutputLines() []string {
@@ -510,6 +521,11 @@ func runInputVisualHeight(promptLabel string, value string, width int) int {
 		return 1
 	}
 	return height
+}
+
+func runInputCursorColumn(input textarea.Model) int {
+	info := input.LineInfo()
+	return info.StartColumn + info.CharOffset
 }
 
 func appendRunScreenText(lines *[]string, current *string, text string) {
