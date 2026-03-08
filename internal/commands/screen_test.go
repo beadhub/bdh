@@ -47,6 +47,24 @@ func TestStyleRunScreenLineCategories(t *testing.T) {
 	}
 }
 
+func TestStyleRunScreenLineKeepsToolArgumentsNeutralOnFirstLine(t *testing.T) {
+	styles := newRunScreenStyles()
+	got := styleRunScreenLine(`- View("/tmp/image.png")`, styles)
+	want := styles.tool.Render(`- View(`) + `"/tmp/image.png"` + styles.tool.Render(`)`)
+	if got != want {
+		t.Fatalf("unexpected styled tool line %q", got)
+	}
+}
+
+func TestStyleRunScreenLineColorsClosingParenOnContinuation(t *testing.T) {
+	styles := newRunScreenStyles()
+	got := styleRunScreenLine(`       offset=48)`, styles)
+	want := `       offset=48` + styles.tool.Render(`)`)
+	if got != want {
+		t.Fatalf("unexpected styled continuation line %q", got)
+	}
+}
+
 func TestParseRunControlSubmission(t *testing.T) {
 	cases := []struct {
 		input string

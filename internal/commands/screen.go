@@ -751,7 +751,7 @@ func styleRunScreenLine(line string, styles runScreenStyles) string {
 	case "run_header":
 		return styles.runHeader.Render(line)
 	case "tool":
-		return styles.tool.Render(line)
+		return styleRunScreenToolLine(line, styles)
 	case "result":
 		return styles.result.Render(line)
 	case "done":
@@ -761,8 +761,25 @@ func styleRunScreenLine(line string, styles runScreenStyles) string {
 	case "hint":
 		return styles.hint.Render(line)
 	default:
+		return styleRunScreenToolClosingParen(line, styles)
+	}
+}
+
+func styleRunScreenToolLine(line string, styles runScreenStyles) string {
+	idx := strings.Index(line, "(")
+	if idx < 0 {
+		return styles.tool.Render(line)
+	}
+	return styles.tool.Render(line[:idx+1]) + styleRunScreenToolClosingParen(line[idx+1:], styles)
+}
+
+func styleRunScreenToolClosingParen(line string, styles runScreenStyles) string {
+	trimmed := strings.TrimRight(line, " ")
+	if trimmed == "" || !strings.HasSuffix(trimmed, ")") {
 		return line
 	}
+	suffixStart := len(trimmed) - 1
+	return line[:suffixStart] + styles.tool.Render(")") + line[len(trimmed):]
 }
 
 func runScreenLineStyleKind(line string) string {
