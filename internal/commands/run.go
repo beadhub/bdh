@@ -925,7 +925,7 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		state.PauseNoticeShown = false
 		if state.AutofeedBeads {
 			state.AutofeedBeads = false
-			l.println("info: bead autofeed disabled for manual conversation. use /autofeed on to re-enable.")
+			l.announceAutofeedState(false, "disabled for manual conversation. use /autofeed on to re-enable.")
 		}
 		if activeRun {
 			l.printf("\nqueued prompt override: %s\n", truncateRunText(state.NextPrompt, 80))
@@ -953,11 +953,11 @@ func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, acti
 		l.renderInputPrompt(state)
 	case runControlAutofeedOn:
 		state.AutofeedBeads = true
-		l.println("info: bead autofeed on. claimed and ready beads can wake the agent.")
+		l.announceAutofeedState(true, "on. claimed and ready beads can wake the agent.")
 		l.renderInputPrompt(state)
 	case runControlAutofeedOff:
 		state.AutofeedBeads = false
-		l.println("info: bead autofeed off. only comms can wake the agent.")
+		l.announceAutofeedState(false, "off. only comms can wake the agent.")
 		l.renderInputPrompt(state)
 	case runControlQuit:
 		state.PendingInput = false
@@ -1148,6 +1148,15 @@ func (l *runLoop) setStatusLine(text string) {
 	if l.screen != nil {
 		l.screen.SetStatusLine(text)
 	}
+}
+
+func (l *runLoop) announceAutofeedState(enabled bool, detail string) {
+	mode := "off"
+	if enabled {
+		mode = "on"
+	}
+	l.println("info: bead autofeed " + detail)
+	l.setStatusLine("bead autofeed " + mode)
 }
 
 func (l *runLoop) clearStatusLine() {

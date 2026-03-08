@@ -1255,6 +1255,22 @@ func TestApplyControlEventAutofeedCommandsToggleState(t *testing.T) {
 	}
 }
 
+func TestApplyControlEventAutofeedCommandsUpdateScreenStatusLine(t *testing.T) {
+	screen := &runScreenManager{promptLabel: defaultRunInputPromptLabel}
+	loop := &runLoop{screen: screen}
+	state := &runState{}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlAutofeedOn}, state, false, nil)
+	if screen.statusLine != "bead autofeed on" {
+		t.Fatalf("expected on status line, got %q", screen.statusLine)
+	}
+
+	loop.applyControlEvent(runControlEvent{Type: runControlAutofeedOff}, state, false, nil)
+	if screen.statusLine != "bead autofeed off" {
+		t.Fatalf("expected off status line, got %q", screen.statusLine)
+	}
+}
+
 func TestRunLoopInitialPromptBypassesDispatchCyclePrompt(t *testing.T) {
 	dispatcher := &fakeRunDispatcher{
 		decisions: []runDispatchDecision{
