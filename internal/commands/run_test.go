@@ -48,7 +48,7 @@ func TestRunLoopStartsFreshThenKeepsExactSessionWithoutContinueMode(t *testing.T
 		now:      func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) },
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		out:      io.Discard,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
 			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
@@ -85,7 +85,7 @@ func TestRunLoopUsesContinueWhenEnabled(t *testing.T) {
 		now:      func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) },
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		out:      io.Discard,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
 			onLine(`{"type":"result","duration_ms":1000}`)
 			return nil
@@ -120,7 +120,7 @@ func TestRunLoopUsesExactSessionIDAfterFirstRunWhenContinueEnabled(t *testing.T)
 		now:      func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) },
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		out:      io.Discard,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
 			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
@@ -154,7 +154,7 @@ func TestRunLoopFormatsOutput(t *testing.T) {
 		now:      func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) },
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		out:      &output,
-		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			onLine(`{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"Thinking..."}}}`)
 			onLine(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"exec_command","input":{"cmd":"pwd"}}]}}`)
 			onLine(`{"type":"tool_result","content":"ok"}`)
@@ -201,7 +201,7 @@ func TestRunLoopAddsBlankLineBetweenStructuredOutputAndText(t *testing.T) {
 		now:      func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) },
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		out:      &output,
-		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			onLine(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"pwd"}}]}}`)
 			onLine(`{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"Done reading."}}}`)
 			onLine(`{"type":"result","duration_ms":1000}`)
@@ -264,7 +264,7 @@ func TestRunLoopInitialPromptAppliesOnlyToFirstRun(t *testing.T) {
 		now:      func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) },
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		out:      io.Discard,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
 			onLine(`{"type":"result","duration_ms":1000}`)
 			return nil
@@ -304,7 +304,7 @@ func TestRunLoopStopsAfterOneRunWhenOnlyInitialPromptExistsWithoutDispatch(t *te
 		now:      time.Now,
 		out:      &output,
 		sleep:    func(context.Context, time.Duration) error { return nil },
-		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			runCount++
 			onLine(`{"type":"result","duration_ms":1000}`)
 			return nil
@@ -345,7 +345,7 @@ func TestRunLoopIdleCountdown(t *testing.T) {
 			slept = append(slept, d)
 			return nil
 		},
-		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			onLine(`{"type":"result","duration_ms":1000}`)
 			return nil
 		},
@@ -387,7 +387,7 @@ func TestRunLoopStopCancelsActiveRunAndPausesUntilResume(t *testing.T) {
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		control:  controller,
-		runner: func(ctx context.Context, _ string, _ []string, onLine func(string)) error {
+		runner: func(ctx context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			mu.Lock()
 			runCount++
 			currentRun := runCount
@@ -465,7 +465,7 @@ func TestRunLoopStopTreatsCanceledProcessExitAsNonFatal(t *testing.T) {
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		control:  controller,
-		runner: func(ctx context.Context, _ string, _ []string, onLine func(string)) error {
+		runner: func(ctx context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			mu.Lock()
 			runCount++
 			currentRun := runCount
@@ -541,7 +541,7 @@ func TestRunLoopStopPrintsSinglePauseNotice(t *testing.T) {
 		out:      &output,
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		control:  controller,
-		runner: func(ctx context.Context, _ string, _ []string, onLine func(string)) error {
+		runner: func(ctx context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			close(runStarted)
 			<-ctx.Done()
 			return ctx.Err()
@@ -612,7 +612,7 @@ func TestRunLoopQuitCancelsActiveRunAndExits(t *testing.T) {
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		control:  controller,
-		runner: func(ctx context.Context, _ string, _ []string, _ func(string)) error {
+		runner: func(ctx context.Context, _ string, _ []string, _ func(string), _ io.Writer) error {
 			close(runStarted)
 			<-ctx.Done()
 			return ctx.Err()
@@ -656,7 +656,7 @@ func TestRunLoopWaitPausesUntilResume(t *testing.T) {
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		control:  controller,
-		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			mu.Lock()
 			runCount++
 			currentRun := runCount
@@ -730,7 +730,7 @@ func TestRunLoopPromptOverrideFromActiveRun(t *testing.T) {
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		control:  controller,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			mu.Lock()
 			runCount++
 			currentRun := runCount
@@ -805,7 +805,7 @@ func TestRunLoopPromptOverrideForcesRunWhenDispatchWouldSkip(t *testing.T) {
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		control:  controller,
 		dispatch: dispatcher,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			mu.Lock()
 			runCount++
 			currentRun := runCount
@@ -882,7 +882,7 @@ func TestRunLoopPromptOverrideBypassesDispatchCyclePrompt(t *testing.T) {
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		control:  controller,
 		dispatch: dispatcher,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			mu.Lock()
 			runCount++
 			currentRun := runCount
@@ -952,7 +952,7 @@ func TestRunLoopInitialPromptForcesRunWhenDispatchWouldSkip(t *testing.T) {
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		dispatch: dispatcher,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
 			onLine(`{"type":"result","duration_ms":1000}`)
 			return nil
@@ -989,7 +989,7 @@ func TestRunLoopInitialPromptBypassesDispatchCyclePrompt(t *testing.T) {
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		dispatch: dispatcher,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
 			onLine(`{"type":"result","duration_ms":1000}`)
 			return nil
@@ -1030,7 +1030,7 @@ func TestRunLoopTypingDuringActiveRunDoesNotPauseLoop(t *testing.T) {
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		control:  controller,
-		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			mu.Lock()
 			runCount++
 			currentRun := runCount
@@ -1147,7 +1147,7 @@ func TestRunLoopPropagatesRunnerError(t *testing.T) {
 		now:      time.Now,
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
-		runner: func(_ context.Context, _ string, _ []string, _ func(string)) error {
+		runner: func(_ context.Context, _ string, _ []string, _ func(string), _ io.Writer) error {
 			return expected
 		},
 	}
@@ -1167,7 +1167,7 @@ func TestRunLoopPrefersProviderStructuredErrorOverRawExitStatus(t *testing.T) {
 		now:      time.Now,
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
-		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			onLine(`{"type":"result","duration_ms":320,"session_id":"s1","is_error":true,"result":"You've hit your limit"}`)
 			return errors.New("exit status 1")
 		},
@@ -1197,7 +1197,7 @@ func TestRunLoopAutoCompactsBeforeWaitWhenUsageExceedsThreshold(t *testing.T) {
 			sleepCalls++
 			return nil
 		},
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
 			if len(commands) == 1 {
 				onLine(`{"type":"assistant","message":{"model":"claude-opus-4-6","usage":{"input_tokens":170000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":800},"content":[]}}`)
@@ -1242,7 +1242,7 @@ func TestRunLoopAutoCompactReplacesWaitBeforeNextCycle(t *testing.T) {
 			sleepCalls++
 			return nil
 		},
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
 			switch len(commands) {
 			case 1:

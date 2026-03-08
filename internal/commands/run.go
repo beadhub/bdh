@@ -17,7 +17,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type runCommandRunner func(ctx context.Context, dir string, argv []string, onLine func(string)) error
+type runCommandRunner func(ctx context.Context, dir string, argv []string, onLine func(string), stderrSink io.Writer) error
 type runSleepFunc func(ctx context.Context, d time.Duration) error
 
 type runLoop struct {
@@ -32,6 +32,7 @@ type runLoop struct {
 	defaults          runDispatchDefaults
 	screen            *runScreenManager
 	inputPromptLabel  string
+	logs              *runLogSession
 	writeMu           sync.Mutex
 }
 
@@ -46,6 +47,7 @@ type runLoopOptions struct {
 	Model               string
 	CompactThresholdPct int
 	Services            []runServiceConfig
+	Debug               bool
 }
 
 type runCycleDecision struct {
@@ -56,23 +58,23 @@ type runCycleDecision struct {
 }
 
 type runState struct {
-	Run            int
-	SessionID      string
-	RanOnce        bool
-	RunInterrupted bool
-	PauseAfterRun  bool
+	Run              int
+	SessionID        string
+	RanOnce          bool
+	RunInterrupted   bool
+	PauseAfterRun    bool
 	PauseNoticeShown bool
-	StopRequested  bool
-	Paused         bool
-	NextPrompt     string
-	PendingInput   bool
-	InputBuffer    string
-	TextProbe      string
-	SuppressText   bool
-	StructuredOut  bool
-	LastRunError   string
-	LastRunUsage   runUsageStats
-	HasRunUsage    bool
+	StopRequested    bool
+	Paused           bool
+	NextPrompt       string
+	PendingInput     bool
+	InputBuffer      string
+	TextProbe        string
+	SuppressText     bool
+	StructuredOut    bool
+	LastRunError     string
+	LastRunUsage     runUsageStats
+	HasRunUsage      bool
 }
 
 var (
@@ -90,6 +92,7 @@ var (
 	runProviderName string
 	runIgnoreBeads  bool
 	runInitConfig   bool
+	runDebugMode    bool
 )
 
 var runCmd = &cobra.Command{
@@ -179,16 +182,17 @@ Future provider work will add more backends on top of the same loop.`,
 		}
 
 		opts := runLoopOptions{
-			InitialPrompt: strings.TrimSpace(strings.Join(args, " ")),
-			Prompt:        settings.BasePrompt,
-			WaitSeconds:   settings.WaitSeconds,
-			MaxRuns:       runMaxRuns,
-			ContinueMode:  runContinueMode,
-			WorkingDir:    runWorkingDir,
-			AllowedTools:  runAllowedTools,
-			Model:         runModel,
+			InitialPrompt:       strings.TrimSpace(strings.Join(args, " ")),
+			Prompt:              settings.BasePrompt,
+			WaitSeconds:         settings.WaitSeconds,
+			MaxRuns:             runMaxRuns,
+			ContinueMode:        runContinueMode,
+			WorkingDir:          runWorkingDir,
+			AllowedTools:        runAllowedTools,
+			Model:               runModel,
 			CompactThresholdPct: settings.CompactThreshold,
-			Services:      settings.Services,
+			Services:            settings.Services,
+			Debug:               resolveRunDebugMode(cmd.Flags().Changed("debug"), runDebugMode),
 		}
 
 		err = loop.Run(ctx, opts)
@@ -216,6 +220,7 @@ func init() {
 	runCmd.Flags().StringVar(&runProviderName, "provider", "claude", "Agent provider to run")
 	runCmd.Flags().BoolVar(&runIgnoreBeads, "ignore-beads", false, "Ignore claims and ready beads; only wake for incoming chat or unread mail")
 	runCmd.Flags().BoolVar(&runInitConfig, "init", false, "Prompt for ~/.config/beadhub/run.json values and write them")
+	runCmd.Flags().BoolVar(&runDebugMode, "debug", false, "Enable detailed bdh :run debug logging (or set BDH_RUN_DEBUG=1)")
 }
 
 func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
@@ -241,9 +246,25 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 	}
 
 	state := &runState{}
+	logs, err := newRunLogSession(opts.WorkingDir, opts.Debug, l.now())
+	if err != nil {
+		return err
+	}
+	l.logs = logs
+	defer func() {
+		l.logf("run loop stop")
+		_ = logs.Close()
+	}()
+	l.logf("run loop start provider=%s continue=%t max_runs=%d wait=%d services=%d", l.provider.Name(), opts.ContinueMode, opts.MaxRuns, opts.WaitSeconds, len(opts.Services))
+	if opts.Debug {
+		l.println(fmt.Sprintf("info: debug logs %s", logs.RunLogPath()))
+	}
 	serviceSupervisor := l.serviceSupervisor
 	if serviceSupervisor == nil && len(opts.Services) > 0 {
 		serviceSupervisor = newRunServiceManager(l.println)
+	}
+	if manager, ok := serviceSupervisor.(*runServiceManager); ok {
+		manager.logs = logs
 	}
 	if serviceSupervisor != nil && len(opts.Services) > 0 {
 		if err := serviceSupervisor.Start(ctx, opts.Services, opts.WorkingDir); err != nil {
@@ -258,6 +279,7 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 			return err
 		}
 		if decision.Skip {
+			l.logf("cycle decision skip wait=%d", decision.WaitSeconds)
 			if err := l.waitForWork(ctx, decision.WaitSeconds, state); err != nil {
 				if state.StopRequested && errors.Is(err, context.Canceled) {
 					return nil
@@ -271,6 +293,7 @@ func (l *runLoop) Run(ctx context.Context, opts runLoopOptions) error {
 		missionPrompt := resolveRunMissionPrompt(baseMissionPrompt, decision.MissionPrompt)
 		prompt := composeRunPromptWithServices(missionPrompt, decision.Prompt, opts.Services)
 		displayPrompt := runDisplayPrompt(missionPrompt, decision.Prompt)
+		l.logf("cycle decision run wait=%d mission=%q cycle=%q", decision.WaitSeconds, truncateRunText(missionPrompt, 120), truncateRunText(decision.Prompt, 120))
 		if strings.TrimSpace(prompt) == "" {
 			if l.dispatch == nil && state.Run > 0 && strings.TrimSpace(opts.Prompt) == "" && strings.TrimSpace(opts.InitialPrompt) != "" {
 				l.println("done: initial prompt consumed; use --base-prompt for a persistent mission.")
@@ -324,6 +347,7 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 		explicitMissionPrompt = strings.TrimSpace(opts.InitialPrompt)
 	}
 	if explicitMissionPrompt != "" {
+		l.logf("next prompt explicit queued=%t initial=%t", queuedMissionPrompt != "", state.Run == 0 && queuedMissionPrompt == "")
 		return runCycleDecision{
 			MissionPrompt: explicitMissionPrompt,
 			WaitSeconds:   opts.WaitSeconds,
@@ -332,16 +356,18 @@ func (l *runLoop) nextPrompt(ctx context.Context, opts runLoopOptions, state *ru
 	if l.dispatch != nil {
 		decision, err := l.dispatch.Next(ctx)
 		if err != nil {
+			l.logf("dispatch error: %v", err)
 			l.printf("info: dispatch failed: %v\n", err)
 			defaults := withRunDispatchDefaults(l.defaults)
 			l.println("info: waiting for dispatch recovery before starting a run.")
 			return runCycleDecision{WaitSeconds: defaults.IdleWaitSeconds, Skip: true}, nil
 		}
 		cycle := runCycleDecision{
-			Prompt:        decision.Prompt,
-			WaitSeconds:   decision.WaitSeconds,
-			Skip:          decision.Skip,
+			Prompt:      decision.Prompt,
+			WaitSeconds: decision.WaitSeconds,
+			Skip:        decision.Skip,
 		}
+		l.logf("dispatch decision skip=%t wait=%d prompt=%q", cycle.Skip, cycle.WaitSeconds, truncateRunText(cycle.Prompt, 120))
 		return cycle, nil
 	}
 	return runCycleDecision{
@@ -374,6 +400,7 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	if err != nil {
 		return err
 	}
+	l.logf("provider command mode=%s argv=%s", formatRunProviderMode(l.provider, buildOpts), strings.Join(argv, " "))
 
 	l.printf("\n%s  %s  >  %s\n\n", header, l.now().Format("15:04:05"), truncateRunText(displayPrompt, 80))
 	l.println(formatRunProviderMode(l.provider, buildOpts))
@@ -389,10 +416,18 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	defer cancel()
 
 	errCh := make(chan error, 1)
+	var stderrSink io.WriteCloser
+	if l.logs != nil {
+		stderrSink, err = l.logs.OpenProviderStderr()
+		if err != nil {
+			return err
+		}
+		defer func() { _ = stderrSink.Close() }()
+	}
 	go func() {
 		errCh <- l.runner(runCtx, opts.WorkingDir, argv, func(line string) {
 			l.handleOutputLine(line, presenter, state)
-		})
+		}, stderrSink)
 	}()
 
 	for {
@@ -430,6 +465,7 @@ func (l *runLoop) maybeAutoCompact(ctx context.Context, opts runLoopOptions, sta
 		return false, nil
 	}
 	l.printf("\ninfo: context %.1f%% exceeds %d%%; running /compact\n", pct, opts.CompactThresholdPct)
+	l.logf("auto-compact context_pct=%.1f threshold=%d", pct, opts.CompactThresholdPct)
 	if err := l.executeRun(ctx, opts, state, "/compact", "/compact", "compact"); err != nil {
 		return false, err
 	}
@@ -450,6 +486,7 @@ func (l *runLoop) drainPendingControlEvents(state *runState, activeRun bool) {
 func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, state *runState) {
 	event, err := l.provider.ParseOutput(line)
 	if err != nil {
+		l.logf("provider parse fallback line=%q err=%v", truncateRunText(line, 120), err)
 		l.runPresenterEnsureTextSpacing(presenter)
 		l.println(line)
 		presenter.lastWasStructured = false
@@ -496,6 +533,7 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 		state.StructuredOut = true
 		if event.IsError && strings.TrimSpace(event.Text) != "" {
 			state.LastRunError = strings.TrimSpace(event.Text)
+			l.logf("provider done error=%q", state.LastRunError)
 		}
 		l.runPresenterEnsureStructuredSpacing(presenter)
 		l.printf("%s\n", formatRunDone(event))
@@ -695,6 +733,7 @@ func (l *runLoop) controlEvents() <-chan runControlEvent {
 }
 
 func (l *runLoop) applyControlEvent(event runControlEvent, state *runState, activeRun bool, cancel context.CancelFunc) {
+	l.logf("control event=%s active=%t text=%q", event.Type, activeRun, truncateRunText(strings.TrimSpace(event.Text), 120))
 	switch event.Type {
 	case runControlTypingStarted:
 		state.PendingInput = true
@@ -962,7 +1001,7 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func realRunCommand(ctx context.Context, dir string, argv []string, onLine func(string)) error {
+func realRunCommand(ctx context.Context, dir string, argv []string, onLine func(string), stderrSink io.Writer) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("empty command")
 	}
@@ -976,7 +1015,11 @@ func realRunCommand(ctx context.Context, dir string, argv []string, onLine func(
 	}
 
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	if stderrSink != nil {
+		cmd.Stderr = io.MultiWriter(&stderr, stderrSink)
+	} else {
+		cmd.Stderr = &stderr
+	}
 
 	if err := cmd.Start(); err != nil {
 		return err
@@ -1006,4 +1049,26 @@ func realRunCommand(ctx context.Context, dir string, argv []string, onLine func(
 		return err
 	}
 	return nil
+}
+
+func (l *runLoop) logf(format string, args ...any) {
+	if l.logs != nil {
+		l.logs.Logf(format, args...)
+	}
+}
+
+func resolveRunDebugMode(flagSet bool, flagValue bool) bool {
+	if flagSet {
+		return flagValue
+	}
+	env := strings.TrimSpace(os.Getenv("BDH_RUN_DEBUG"))
+	if env == "" {
+		return false
+	}
+	switch strings.ToLower(env) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }

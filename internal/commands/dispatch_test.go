@@ -200,7 +200,7 @@ func TestRunLoopComposesBasePromptWithDispatcherPrompt(t *testing.T) {
 		out:      io.Discard,
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		dispatch: dispatcher,
-		runner: func(_ context.Context, _ string, argv []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
 			onLine(`{"type":"result","duration_ms":1000}`)
 			return nil
@@ -244,7 +244,7 @@ func TestRunLoopWaitsForDispatchRecoveryOnDispatchErrorEvenWithBasePrompt(t *tes
 			return nil
 		},
 		dispatch: dispatcher,
-		runner: func(_ context.Context, _ string, _ []string, _ func(string)) error {
+		runner: func(_ context.Context, _ string, _ []string, _ func(string), _ io.Writer) error {
 			t.Fatal("runner should not be called")
 			return nil
 		},
@@ -289,7 +289,7 @@ func TestRunLoopWaitsForDispatchRecoveryWithoutExplicitPrompt(t *testing.T) {
 			return nil
 		},
 		dispatch: dispatcher,
-		runner: func(_ context.Context, _ string, _ []string, _ func(string)) error {
+		runner: func(_ context.Context, _ string, _ []string, _ func(string), _ io.Writer) error {
 			t.Fatal("runner should not be called")
 			return nil
 		},

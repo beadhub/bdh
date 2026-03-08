@@ -3,6 +3,9 @@ package commands
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -99,7 +102,7 @@ func TestRunLoopStartsServicesBeforeFirstRun(t *testing.T) {
 		out:               ioDiscard{},
 		sleep:             func(context.Context, time.Duration) error { return nil },
 		serviceSupervisor: supervisor,
-		runner: func(_ context.Context, _ string, _ []string, onLine func(string)) error {
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			if !serviceStarted {
 				runnerOrderErr = errors.New("expected services to start before first run")
 			}
@@ -127,6 +130,45 @@ func TestRunLoopStartsServicesBeforeFirstRun(t *testing.T) {
 	}
 	if !supervisor.stopped {
 		t.Fatal("expected services to stop when run loop exits")
+	}
+}
+
+func TestStartRunServiceProcessCapturesStdoutAndStderrToLogs(t *testing.T) {
+	t.Parallel()
+
+	logs, err := newRunLogSession(t.TempDir(), true, time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("newRunLogSession returned error: %v", err)
+	}
+	defer func() { _ = logs.Close() }()
+
+	process, err := startRunServiceProcess(
+		context.Background(),
+		t.TempDir(),
+		runServiceConfig{Name: "backend", Command: `printf 'hello stdout\n'; printf 'hello stderr\n' >&2`},
+		logs,
+	)
+	if err != nil {
+		t.Fatalf("startRunServiceProcess returned error: %v", err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatalf("Wait returned error: %v", err)
+	}
+
+	stdoutData, err := os.ReadFile(filepath.Join(logs.Dir(), "service-backend.stdout.log"))
+	if err != nil {
+		t.Fatalf("read stdout log: %v", err)
+	}
+	if !strings.Contains(string(stdoutData), "hello stdout") {
+		t.Fatalf("stdout log missing output: %q", string(stdoutData))
+	}
+
+	stderrData, err := os.ReadFile(filepath.Join(logs.Dir(), "service-backend.stderr.log"))
+	if err != nil {
+		t.Fatalf("read stderr log: %v", err)
+	}
+	if !strings.Contains(string(stderrData), "hello stderr") {
+		t.Fatalf("stderr log missing output: %q", string(stderrData))
 	}
 }
 

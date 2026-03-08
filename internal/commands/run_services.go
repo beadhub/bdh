@@ -23,6 +23,7 @@ type runServiceSupervisor interface {
 
 type runServiceManager struct {
 	logf         func(string)
+	logs         *runLogSession
 	startProcess runServiceStartFunc
 	restartDelay time.Duration
 	cancel       context.CancelFunc
@@ -36,16 +37,18 @@ type runServiceProcess interface {
 }
 
 type runExecServiceProcess struct {
-	cmd  *exec.Cmd
-	done chan struct{}
+	cmd     *exec.Cmd
+	done    chan struct{}
+	closers []io.Closer
 }
 
 func newRunServiceManager(logf func(string)) *runServiceManager {
-	return &runServiceManager{
+	manager := &runServiceManager{
 		logf:         logf,
-		startProcess: startRunServiceProcess,
 		restartDelay: 1 * time.Second,
 	}
+	manager.startProcess = manager.startProcessWithLogs
+	return manager
 }
 
 func (m *runServiceManager) Start(ctx context.Context, services []runServiceConfig, dir string) error {
@@ -53,7 +56,7 @@ func (m *runServiceManager) Start(ctx context.Context, services []runServiceConf
 		return nil
 	}
 	if m.startProcess == nil {
-		m.startProcess = startRunServiceProcess
+		m.startProcess = m.startProcessWithLogs
 	}
 	if m.restartDelay <= 0 {
 		m.restartDelay = time.Second
@@ -122,6 +125,9 @@ func (m *runServiceManager) log(line string) {
 	if m.logf != nil {
 		m.logf(line)
 	}
+	if m.logs != nil {
+		m.logs.Logf("%s", line)
+	}
 }
 
 func runServiceSleep(ctx context.Context, d time.Duration) bool {
@@ -135,25 +141,45 @@ func runServiceSleep(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func startRunServiceProcess(ctx context.Context, dir string, service runServiceConfig) (runServiceProcess, error) {
+func (m *runServiceManager) startProcessWithLogs(ctx context.Context, dir string, service runServiceConfig) (runServiceProcess, error) {
+	return startRunServiceProcess(ctx, dir, service, m.logs)
+}
+
+func startRunServiceProcess(ctx context.Context, dir string, service runServiceConfig, logs *runLogSession) (runServiceProcess, error) {
 	cmd := exec.Command(defaultRunServiceShell(), "-lc", service.Command)
 	cmd.Dir = dir
+	var closers []io.Closer
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
+	if logs != nil {
+		stdoutFile, stderrFile, err := logs.OpenServiceLogs(service.Name)
+		if err != nil {
+			return nil, fmt.Errorf("open service logs for %s: %w", service.Name, err)
+		}
+		cmd.Stdout = stdoutFile
+		cmd.Stderr = stderrFile
+		closers = append(closers, stdoutFile, stderrFile)
+	}
 	setRunServiceProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
+		for _, closer := range closers {
+			_ = closer.Close()
+		}
 		return nil, err
 	}
 
 	done := make(chan struct{})
 	go runServiceWatchContext(ctx, cmd, done)
 
-	return &runExecServiceProcess{cmd: cmd, done: done}, nil
+	return &runExecServiceProcess{cmd: cmd, done: done, closers: closers}, nil
 }
 
 func (p *runExecServiceProcess) Wait() error {
 	err := p.cmd.Wait()
 	close(p.done)
+	for _, closer := range p.closers {
+		_ = closer.Close()
+	}
 	return err
 }
 
