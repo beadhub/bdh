@@ -401,12 +401,18 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	state.LastRunError = ""
 	state.LastRunUsage = runUsageStats{}
 	state.HasRunUsage = false
+	expectedSessionID := strings.TrimSpace(state.SessionID)
+	followUpRun := state.RanOnce
 	buildOpts := runBuildOptions{
 		AllowedTools: opts.AllowedTools,
 		Model:        opts.Model,
 	}
-	if strings.TrimSpace(state.SessionID) != "" {
-		buildOpts.SessionID = state.SessionID
+	if followUpRun {
+		if expectedSessionID == "" {
+			return fmt.Errorf("provider %s did not report a session id for the previous run; cannot guarantee continuity", l.provider.Name())
+		}
+		buildOpts.SessionID = expectedSessionID
+		buildOpts.ContinueSession = true
 	} else if opts.ContinueMode {
 		buildOpts.ContinueSession = true
 	}
@@ -427,6 +433,7 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	state.TextProbe = ""
 	state.SuppressText = false
 	state.StructuredOut = false
+	observedSessionID := ""
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -441,7 +448,7 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	}
 	go func() {
 		errCh <- l.runner(runCtx, opts.WorkingDir, argv, func(line string) {
-			l.handleOutputLine(line, presenter, state)
+			l.handleOutputLine(line, presenter, state, &observedSessionID)
 		}, stderrSink)
 	}()
 
@@ -459,6 +466,14 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 			state.RunInterrupted = false
 			if strings.TrimSpace(state.LastRunError) != "" {
 				return errors.New(state.LastRunError)
+			}
+			if followUpRun {
+				switch {
+				case strings.TrimSpace(observedSessionID) == "":
+					return fmt.Errorf("provider %s did not report a session id for follow-up run", l.provider.Name())
+				case observedSessionID != expectedSessionID:
+					return fmt.Errorf("provider %s switched sessions unexpectedly: expected %s, got %s", l.provider.Name(), expectedSessionID, observedSessionID)
+				}
 			}
 			return err
 		case event := <-l.controlEvents():
@@ -498,7 +513,7 @@ func (l *runLoop) drainPendingControlEvents(state *runState, activeRun bool) {
 	}
 }
 
-func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, state *runState) {
+func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, state *runState, observedSessionID *string) {
 	event, err := l.provider.ParseOutput(line)
 	if err != nil {
 		l.logf("provider parse fallback line=%q err=%v", truncateRunText(line, 120), err)
@@ -512,6 +527,9 @@ func (l *runLoop) handleOutputLine(line string, presenter *runPresenterState, st
 
 	if sid := l.provider.SessionID(event); sid != "" {
 		state.SessionID = sid
+		if observedSessionID != nil {
+			*observedSessionID = sid
+		}
 	}
 	if event != nil && event.Usage != nil {
 		state.LastRunUsage = *event.Usage

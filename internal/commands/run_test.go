@@ -71,12 +71,12 @@ func TestRunLoopStartsFreshThenKeepsExactSessionWithoutContinueMode(t *testing.T
 	if strings.Contains(strings.Join(commands[0], " "), "--resume") {
 		t.Fatalf("first run should not resume an existing session: %q", strings.Join(commands[0], " "))
 	}
-	if !strings.Contains(strings.Join(commands[1], " "), "--resume sess-42") {
-		t.Fatalf("second run should resume exact captured session even without --continue: %q", strings.Join(commands[1], " "))
+	if !strings.Contains(strings.Join(commands[1], " "), "--continue") {
+		t.Fatalf("second run should continue the same claude session even without --continue: %q", strings.Join(commands[1], " "))
 	}
 }
 
-func TestRunLoopUsesContinueWhenEnabled(t *testing.T) {
+func TestRunLoopFailsIfFollowUpContinuityCannotBeGuaranteed(t *testing.T) {
 	provider := claudeProvider{}
 	var commands [][]string
 
@@ -97,17 +97,17 @@ func TestRunLoopUsesContinueWhenEnabled(t *testing.T) {
 		ContinueMode: true,
 		MaxRuns:      2,
 	})
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
+	if err == nil {
+		t.Fatal("expected run to fail when the previous session id was not captured")
 	}
-	if len(commands) != 2 {
-		t.Fatalf("expected 2 commands, got %d", len(commands))
+	if len(commands) != 1 {
+		t.Fatalf("expected only the first command before continuity failure, got %d", len(commands))
 	}
 	if !strings.Contains(strings.Join(commands[0], " "), "--continue") {
 		t.Fatalf("first run should continue the most recent provider session: %q", strings.Join(commands[0], " "))
 	}
-	if !strings.Contains(strings.Join(commands[1], " "), "--continue") {
-		t.Fatalf("second run should continue the provider session when no exact session id was captured: %q", strings.Join(commands[1], " "))
+	if !strings.Contains(err.Error(), "cannot guarantee continuity") {
+		t.Fatalf("expected continuity failure, got %v", err)
 	}
 }
 
@@ -141,8 +141,43 @@ func TestRunLoopUsesExactSessionIDAfterFirstRunWhenContinueEnabled(t *testing.T)
 	if !strings.Contains(strings.Join(commands[0], " "), "--continue") {
 		t.Fatalf("first run should use provider continue mode, got: %q", strings.Join(commands[0], " "))
 	}
-	if !strings.Contains(strings.Join(commands[1], " "), "--resume sess-42") {
-		t.Fatalf("second run should resume exact captured session id, got: %q", strings.Join(commands[1], " "))
+	if !strings.Contains(strings.Join(commands[1], " "), "--continue") {
+		t.Fatalf("second run should stay on the same claude session via --continue, got: %q", strings.Join(commands[1], " "))
+	}
+}
+
+func TestRunLoopUsesExactSessionIDForCodexFollowUps(t *testing.T) {
+	provider := codexProvider{}
+	var commands [][]string
+
+	loop := &runLoop{
+		provider: provider,
+		now:      func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) },
+		sleep:    func(context.Context, time.Duration) error { return nil },
+		out:      io.Discard,
+		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
+			commands = append(commands, append([]string(nil), argv...))
+			onLine(`{"type":"thread.started","thread_id":"019ccab4-4844-7ff3-80f2-b2d3b0c25e79"}`)
+			onLine(`{"type":"turn.completed"}`)
+			return nil
+		},
+	}
+
+	err := loop.Run(context.Background(), runLoopOptions{
+		Prompt:  "continue working",
+		MaxRuns: 2,
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(commands) != 2 {
+		t.Fatalf("expected 2 commands, got %d", len(commands))
+	}
+	if containsText(joinArgs(commands[0]), "resume") {
+		t.Fatalf("first codex run should start fresh, got %q", joinArgs(commands[0]))
+	}
+	if !containsText(joinArgs(commands[1]), "resume 019ccab4-4844-7ff3-80f2-b2d3b0c25e79") {
+		t.Fatalf("second codex run should use exact session id, got %q", joinArgs(commands[1]))
 	}
 }
 
@@ -204,7 +239,7 @@ func TestRunLoopAddsBlankLineBetweenStructuredOutputAndText(t *testing.T) {
 		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			onLine(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"pwd"}}]}}`)
 			onLine(`{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"Done reading."}}}`)
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -266,7 +301,7 @@ func TestRunLoopInitialPromptAppliesOnlyToFirstRun(t *testing.T) {
 		out:      io.Discard,
 		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -306,7 +341,7 @@ func TestRunLoopStopsAfterOneRunWhenOnlyInitialPromptExistsWithoutDispatch(t *te
 		sleep:    func(context.Context, time.Duration) error { return nil },
 		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
 			runCount++
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -346,7 +381,7 @@ func TestRunLoopIdleCountdown(t *testing.T) {
 			return nil
 		},
 		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -395,12 +430,13 @@ func TestRunLoopStopCancelsActiveRunAndPausesUntilResume(t *testing.T) {
 
 			if currentRun == 1 {
 				close(runStarted)
+				onLine(`{"type":"system","subtype":"init","session_id":"sess-42"}`)
 				<-ctx.Done()
 				return ctx.Err()
 			}
 
 			close(secondRunStarted)
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -473,12 +509,13 @@ func TestRunLoopStopTreatsCanceledProcessExitAsNonFatal(t *testing.T) {
 
 			if currentRun == 1 {
 				close(runStarted)
+				onLine(`{"type":"system","subtype":"init","session_id":"sess-42"}`)
 				<-ctx.Done()
 				return errors.New("signal: killed")
 			}
 
 			close(secondRunStarted)
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -800,7 +837,7 @@ func TestRunLoopWaitPausesUntilResume(t *testing.T) {
 				close(secondRunStarted)
 			}
 
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -873,7 +910,7 @@ func TestRunLoopPromptOverrideFromActiveRun(t *testing.T) {
 				<-releaseFirstRun
 			}
 
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -948,7 +985,7 @@ func TestRunLoopPromptOverrideForcesRunWhenDispatchWouldSkip(t *testing.T) {
 				<-releaseFirstRun
 			}
 
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -1025,7 +1062,7 @@ func TestRunLoopPromptOverrideBypassesDispatchCyclePrompt(t *testing.T) {
 				<-releaseFirstRun
 			}
 
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -1085,7 +1122,7 @@ func TestRunLoopInitialPromptForcesRunWhenDispatchWouldSkip(t *testing.T) {
 		dispatch: dispatcher,
 		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -1122,7 +1159,7 @@ func TestRunLoopInitialPromptBypassesDispatchCyclePrompt(t *testing.T) {
 		dispatch: dispatcher,
 		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
@@ -1174,7 +1211,7 @@ func TestRunLoopTypingDuringActiveRunDoesNotPauseLoop(t *testing.T) {
 				close(secondRunStarted)
 			}
 
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}

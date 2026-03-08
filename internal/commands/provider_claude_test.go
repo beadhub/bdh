@@ -66,6 +66,26 @@ func TestClaudeProviderBuildCommandWithSessionID(t *testing.T) {
 	}
 }
 
+func TestClaudeProviderBuildCommandWithContinueAndSessionIDPrefersContinue(t *testing.T) {
+	provider := claudeProvider{}
+
+	command, err := provider.BuildCommand("fix the bug", runBuildOptions{
+		SessionID:       "sess-1",
+		ContinueSession: true,
+	})
+	if err != nil {
+		t.Fatalf("BuildCommand returned error: %v", err)
+	}
+
+	joined := joinArgs(command)
+	if !containsText(joined, "--continue") {
+		t.Fatalf("expected continue flag, got: %q", joined)
+	}
+	if containsText(joined, "--resume sess-1") {
+		t.Fatalf("did not expect explicit resume when follow-up continuity is requested, got: %q", joined)
+	}
+}
+
 func TestClaudeProviderParseOutput(t *testing.T) {
 	provider := claudeProvider{}
 
@@ -131,6 +151,9 @@ func TestClaudeProviderParseOutput(t *testing.T) {
 	if systemEvent.Type != runEventSystem {
 		t.Fatalf("expected system event, got %#v", systemEvent)
 	}
+	if provider.SessionID(systemEvent) != "abc123456789" {
+		t.Fatalf("expected session id on system event, got %#v", provider.SessionID(systemEvent))
+	}
 	if !containsText(systemEvent.Text, "session") || !containsText(systemEvent.Text, "cwd=") {
 		t.Fatalf("expected summarized system message, got %q", systemEvent.Text)
 	}
@@ -145,6 +168,9 @@ func TestClaudeProviderParseNestedSystemMessage(t *testing.T) {
 	}
 	if systemEvent.Type != runEventSystem {
 		t.Fatalf("expected system event, got %#v", systemEvent)
+	}
+	if provider.SessionID(systemEvent) != "abc123456789" {
+		t.Fatalf("expected nested system event to retain session id, got %#v", provider.SessionID(systemEvent))
 	}
 	if !containsText(systemEvent.Text, "session") || !containsText(systemEvent.Text, "cwd=") {
 		t.Fatalf("expected summarized nested system message, got %q", systemEvent.Text)

@@ -124,10 +124,10 @@ func (claudeProvider) BuildCommand(prompt string, opts runBuildOptions) ([]strin
 		"--include-partial-messages",
 	}
 
-	if strings.TrimSpace(opts.SessionID) != "" {
-		command = append(command, "--resume", opts.SessionID)
-	} else if opts.ContinueSession {
+	if opts.ContinueSession {
 		command = append(command, "--continue")
+	} else if strings.TrimSpace(opts.SessionID) != "" {
+		command = append(command, "--resume", opts.SessionID)
 	}
 	if strings.TrimSpace(opts.AllowedTools) != "" {
 		command = append(command, "--allowedTools", opts.AllowedTools)
@@ -218,7 +218,11 @@ func (claudeProvider) ParseOutput(line string) (*runEvent, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &runEvent{Type: runEventSystem, Text: text}, nil
+		return &runEvent{
+			Type:    runEventSystem,
+			Text:    text,
+			Session: claudeSystemSessionID(envelope),
+		}, nil
 	}
 
 	return &runEvent{}, nil
@@ -328,4 +332,16 @@ func claudeSystemEventText(envelope claudeEnvelope) (string, error) {
 	}
 
 	return strings.Join(parts, "  "), nil
+}
+
+func claudeSystemSessionID(envelope claudeEnvelope) string {
+	if len(envelope.Message) > 0 && string(envelope.Message) != "null" {
+		var payload map[string]any
+		if err := json.Unmarshal(envelope.Message, &payload); err == nil {
+			if sessionID, _ := payload["session_id"].(string); strings.TrimSpace(sessionID) != "" {
+				return strings.TrimSpace(sessionID)
+			}
+		}
+	}
+	return strings.TrimSpace(envelope.Session)
 }

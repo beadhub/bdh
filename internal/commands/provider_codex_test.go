@@ -56,6 +56,26 @@ func TestCodexProviderBuildCommandWithSessionID(t *testing.T) {
 	}
 }
 
+func TestCodexProviderBuildCommandWithContinueAndSessionIDPrefersExactResume(t *testing.T) {
+	provider := codexProvider{}
+
+	command, err := provider.BuildCommand("continue working", runBuildOptions{
+		SessionID:       "019ccab4-4844-7ff3-80f2-b2d3b0c25e79",
+		ContinueSession: true,
+	})
+	if err != nil {
+		t.Fatalf("BuildCommand returned error: %v", err)
+	}
+
+	joined := joinArgs(command)
+	if !containsText(joined, "codex exec resume 019ccab4-4844-7ff3-80f2-b2d3b0c25e79 --json continue working") {
+		t.Fatalf("expected explicit codex resume id, got: %q", joined)
+	}
+	if containsText(joined, "--last") {
+		t.Fatalf("did not expect --last when an exact session id is set, got: %q", joined)
+	}
+}
+
 func TestCodexProviderRejectsAllowedTools(t *testing.T) {
 	provider := codexProvider{}
 

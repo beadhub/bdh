@@ -202,7 +202,7 @@ func TestRunLoopComposesBasePromptWithDispatcherPrompt(t *testing.T) {
 		dispatch: dispatcher,
 		runner: func(_ context.Context, _ string, argv []string, onLine func(string), _ io.Writer) error {
 			commands = append(commands, append([]string(nil), argv...))
-			onLine(`{"type":"result","duration_ms":1000}`)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
 			return nil
 		},
 	}
