@@ -479,6 +479,101 @@ func TestWaitForWorkFallsBackToCountdownWhenStreamFails(t *testing.T) {
 	}
 }
 
+func TestExecuteRunInterruptsOnWakeControlEvent(t *testing.T) {
+	stream := newFakeRunWakeStream()
+	runStarted := make(chan struct{})
+
+	loop := &runLoop{
+		provider:   claudeProvider{},
+		out:        io.Discard,
+		wakeStream: stream,
+		now:        time.Now,
+		runner: func(ctx context.Context, _ string, _ []string, _ func(string), _ io.Writer) error {
+			close(runStarted)
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+	state := &runState{}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- loop.executeRun(context.Background(), runLoopOptions{}, state, "prompt", "prompt", "run #1")
+	}()
+
+	select {
+	case <-runStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for active run to start")
+	}
+
+	stream.events <- runWakeEvent{Type: runWakeEventControlInterrupt}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("executeRun returned error: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for interrupted run to stop")
+	}
+
+	if !state.Paused {
+		t.Fatalf("expected interrupted run to leave loop paused, got %#v", state)
+	}
+	if !state.PauseAfterRun {
+		t.Fatalf("expected interrupted run to latch pause-after-run, got %#v", state)
+	}
+}
+
+func TestExecuteRunPauseWakeEventMapsToPauseAfterRun(t *testing.T) {
+	stream := newFakeRunWakeStream()
+	runStarted := make(chan struct{})
+
+	loop := &runLoop{
+		provider:   claudeProvider{},
+		out:        io.Discard,
+		wakeStream: stream,
+		now:        time.Now,
+		runner: func(_ context.Context, _ string, _ []string, onLine func(string), _ io.Writer) error {
+			close(runStarted)
+			time.Sleep(20 * time.Millisecond)
+			onLine(`{"type":"result","duration_ms":1000,"session_id":"sess-42"}`)
+			return nil
+		},
+	}
+	state := &runState{}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- loop.executeRun(context.Background(), runLoopOptions{}, state, "prompt", "prompt", "run #1")
+	}()
+
+	select {
+	case <-runStarted:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for active run to start")
+	}
+
+	stream.events <- runWakeEvent{Type: runWakeEventControlPause}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("executeRun returned error: %v", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("timed out waiting for paused run to finish")
+	}
+
+	if !state.PauseAfterRun {
+		t.Fatalf("expected pause event to latch pause-after-run, got %#v", state)
+	}
+	if state.Paused {
+		t.Fatalf("expected pause event not to cancel active run immediately, got %#v", state)
+	}
+}
+
 func TestRunLoopStopCancelsActiveRunAndPausesUntilResume(t *testing.T) {
 	controller := newFakeRunInputController()
 	runStarted := make(chan struct{})

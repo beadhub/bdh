@@ -449,6 +449,7 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	defer cancel()
 
 	errCh := make(chan error, 1)
+	wakeControls := l.startWakeControlRelay(runCtx)
 	var stderrSink io.WriteCloser
 	if l.logs != nil {
 		stderrSink, err = l.logs.OpenProviderStderr()
@@ -489,6 +490,12 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 			return err
 		case event := <-l.controlEvents():
 			l.applyControlEvent(event, state, true, cancel)
+		case event, ok := <-wakeControls:
+			if !ok {
+				wakeControls = nil
+				continue
+			}
+			l.applyControlEvent(event, state, true, cancel)
 		case <-ctx.Done():
 			cancel()
 			state.StopRequested = true
@@ -511,6 +518,72 @@ func (l *runLoop) maybeAutoCompact(ctx context.Context, opts runLoopOptions, sta
 		return false, err
 	}
 	return true, nil
+}
+
+func (l *runLoop) startWakeControlRelay(ctx context.Context) <-chan runControlEvent {
+	if l.wakeStream == nil {
+		return nil
+	}
+
+	relay := make(chan runControlEvent, 8)
+	go func() {
+		defer close(relay)
+		for ctx.Err() == nil {
+			deadline := l.now().Add(5 * time.Minute)
+			events, errs := l.wakeStream.Stream(ctx, deadline)
+			streamOpen := true
+			for streamOpen && ctx.Err() == nil {
+				select {
+				case evt, ok := <-events:
+					if !ok {
+						events = nil
+						if errs == nil {
+							streamOpen = false
+						}
+						continue
+					}
+					control, ok := runControlEventFromWakeEvent(evt)
+					if !ok {
+						continue
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case relay <- control:
+					}
+				case err, ok := <-errs:
+					if !ok {
+						errs = nil
+						if events == nil {
+							streamOpen = false
+						}
+						continue
+					}
+					if err != nil && ctx.Err() == nil {
+						l.logf("active wake control stream failed: %v", err)
+						time.Sleep(500 * time.Millisecond)
+					}
+					streamOpen = false
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return relay
+}
+
+func runControlEventFromWakeEvent(evt runWakeEvent) (runControlEvent, bool) {
+	switch evt.Type {
+	case runWakeEventControlPause:
+		return runControlEvent{Type: runControlWait}, true
+	case runWakeEventControlResume:
+		return runControlEvent{Type: runControlResume}, true
+	case runWakeEventControlInterrupt:
+		return runControlEvent{Type: runControlStop}, true
+	default:
+		return runControlEvent{}, false
+	}
 }
 
 func (l *runLoop) drainPendingControlEvents(state *runState, activeRun bool) {
