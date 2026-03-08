@@ -139,7 +139,7 @@ func (d *beadhubRunDispatcher) fetchReadyTasks(ctx context.Context) ([]runReadyT
 	var result *bd.Result
 	var err error
 
-	if beads.IsInitialized() {
+	if beads.HasBeadsDir() {
 		result, err = bd.New().Run(ctx, []string{"ready", "--json"})
 	} else {
 		result, err = runNative(d.aw, []string{"ready", "--json"}, nil)

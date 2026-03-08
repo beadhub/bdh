@@ -221,7 +221,7 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 				return nil, fmt.Errorf("--:jump-in requires a configured workspace - run 'bdh :init' first")
 			}
 
-			if beads.IsInitialized() {
+			if beads.HasBeadsDir() {
 				// bd mode without coordination
 				result.Warning = "No .beadhub config found - running without coordination"
 
@@ -454,7 +454,7 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 		}
 	}
 
-	if beads.IsInitialized() {
+	if beads.HasBeadsDir() {
 		// bd mode: pass through to bd binary
 		runner := bd.New()
 		bdResult, err := runner.Run(context.Background(), cleanArgs)
@@ -951,19 +951,19 @@ func syncToBeadHub(cfg *config.Config, bdArgs []string, verbose bool) *SyncResul
 		if errors.As(err, &clientErr) && clientErr.StatusCode == 409 {
 			// Protocol mismatch: retry once with full sync.
 			result.SyncMode = "full"
-				fullReq := &client.SyncRequest{
-					WorkspaceID: cfg.WorkspaceID,
-					RepoID:      cfg.RepoID,
-					Alias:       cfg.Alias,
-					HumanName:   cfg.HumanName,
-					RepoOrigin:  cfg.RepoOrigin,
-					Role:        cfg.Role,
-					CommandLine: strings.Join(bdArgs, " "),
-					SyncMode:    "full",
-					IssuesJSONL: string(content),
-					SyncProtocolVersion: func() *int {
-						v := syncState.ProtocolVersion
-						return &v
+			fullReq := &client.SyncRequest{
+				WorkspaceID: cfg.WorkspaceID,
+				RepoID:      cfg.RepoID,
+				Alias:       cfg.Alias,
+				HumanName:   cfg.HumanName,
+				RepoOrigin:  cfg.RepoOrigin,
+				Role:        cfg.Role,
+				CommandLine: strings.Join(bdArgs, " "),
+				SyncMode:    "full",
+				IssuesJSONL: string(content),
+				SyncProtocolVersion: func() *int {
+					v := syncState.ProtocolVersion
+					return &v
 				}(),
 			}
 

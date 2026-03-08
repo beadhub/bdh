@@ -153,6 +153,14 @@ func IsInitialized() bool {
 	return err == nil && !info.IsDir()
 }
 
+// HasBeadsDir returns true when a local .beads directory is present, even if
+// the database file has not been created yet.
+func HasBeadsDir() bool {
+	beadsDir := GetBeadsDir()
+	info, err := os.Stat(beadsDir)
+	return err == nil && info.IsDir()
+}
+
 // ResetCache resets the cached beads directory. This is intended for use
 // by tests that need to change directory between subtests.
 // In production, the cache is safe because the working directory
