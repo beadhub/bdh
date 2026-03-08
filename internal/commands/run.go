@@ -437,7 +437,7 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	l.printf("\n%s  %s  >  %s\n\n", header, l.now().Format("15:04:05"), truncateRunText(displayPrompt, 80))
 	l.println(formatRunProviderMode(l.provider, buildOpts))
 	l.println("type /wait, /autofeed off, /stop, /quit, or start typing to queue a prompt.")
-	l.clearStatusLine()
+	l.setStatusLine("running")
 	l.renderInputPrompt(state)
 
 	presenter := &runPresenterState{}
@@ -447,6 +447,11 @@ func (l *runLoop) executeRun(ctx context.Context, opts runLoopOptions, state *ru
 	observedSessionID := ""
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer func() {
+		if !state.Paused && !state.ExitConfirmPending {
+			l.clearStatusLine()
+		}
+	}()
 
 	errCh := make(chan error, 1)
 	wakeControls := l.startWakeControlRelay(runCtx)

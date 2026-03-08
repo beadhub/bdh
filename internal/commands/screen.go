@@ -572,7 +572,7 @@ func (m runScreenModel) formattedOutputLines() []string {
 
 func (m runScreenModel) statusText() string {
 	if strings.TrimSpace(m.statusLine) == "" {
-		return "running"
+		return ""
 	}
 	return truncateRunText(strings.TrimSpace(m.statusLine), max(1, m.width-2))
 }
