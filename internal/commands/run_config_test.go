@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	awconfig "github.com/awebai/aw/awconfig"
 	"github.com/beadhub/bdh/internal/config"
 )
 
@@ -121,6 +122,93 @@ func TestLoadRunUserConfigLocalOverridesGlobal(t *testing.T) {
 	}
 }
 
+func TestLoadRunUserConfigUsesAWBaseThenBDHOverrides(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	oldPath := config.GetPath()
+	config.SetPath("")
+	t.Cleanup(func() { config.SetPath(oldPath) })
+
+	workspaceRoot := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace failed: %v", err)
+	}
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd failed: %v", err)
+	}
+	if err := os.Chdir(workspaceRoot); err != nil {
+		t.Fatalf("chdir failed: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+
+	bdhConfigPath := filepath.Join(workspaceRoot, ".beadhub")
+	if err := os.WriteFile(bdhConfigPath, []byte("workspace_id: 11111111-1111-1111-1111-111111111111\nbeadhub_url: \"https://app.beadhub.ai/api\"\nproject_slug: \"beadhub\"\nrepo_origin: \"git@github.com:beadhub/bdh.git\"\ncanonical_origin: \"github.com/beadhub/bdh\"\nalias: \"noah\"\nhuman_name: \"Juan\"\n"), 0o600); err != nil {
+		t.Fatalf("write .beadhub failed: %v", err)
+	}
+
+	awContextPath := filepath.Join(workspaceRoot, awconfig.DefaultWorktreeContextRelativePath())
+	if err := os.MkdirAll(filepath.Dir(awContextPath), 0o755); err != nil {
+		t.Fatalf("mkdir aw context dir failed: %v", err)
+	}
+	if err := os.WriteFile(awContextPath, []byte("default_account: default\n"), 0o600); err != nil {
+		t.Fatalf("write aw context failed: %v", err)
+	}
+
+	awGlobalPath := filepath.Join(dir, ".config", "aw", "run.json")
+	if err := os.MkdirAll(filepath.Dir(awGlobalPath), 0o755); err != nil {
+		t.Fatalf("mkdir aw global dir failed: %v", err)
+	}
+	if err := os.WriteFile(awGlobalPath, []byte(`{"base_prompt":"aw global base","work_prompt_suffix":"aw global work","wait_seconds":11,"idle_wait_seconds":41,"compact_threshold_pct":66,"services":[{"name":"aw-global","command":"make aw-global"}]}`), 0o600); err != nil {
+		t.Fatalf("write aw global config failed: %v", err)
+	}
+
+	awLocalPath := filepath.Join(workspaceRoot, ".aw", "run.json")
+	if err := os.WriteFile(awLocalPath, []byte(`{"base_prompt":"aw local base","comms_prompt_suffix":"aw local comms","wait_seconds":12,"services":[{"name":"aw-local","command":"make aw-local"}]}`), 0o600); err != nil {
+		t.Fatalf("write aw local config failed: %v", err)
+	}
+
+	bdhGlobalPath := filepath.Join(dir, ".config", "beadhub", "run.json")
+	if err := os.MkdirAll(filepath.Dir(bdhGlobalPath), 0o755); err != nil {
+		t.Fatalf("mkdir bdh global dir failed: %v", err)
+	}
+	if err := os.WriteFile(bdhGlobalPath, []byte(`{"work_prompt_suffix":"bdh global work","wait_seconds":13}`), 0o600); err != nil {
+		t.Fatalf("write bdh global config failed: %v", err)
+	}
+
+	bdhLocalPath := filepath.Join(workspaceRoot, ".beadhub-run.json")
+	if err := os.WriteFile(bdhLocalPath, []byte(`{"comms_prompt_suffix":"bdh local comms","idle_wait_seconds":14,"services":[{"name":"bdh-local","command":"make bdh-local"}]}`), 0o600); err != nil {
+		t.Fatalf("write bdh local config failed: %v", err)
+	}
+
+	cfg, err := loadRunUserConfig()
+	if err != nil {
+		t.Fatalf("loadRunUserConfig returned error: %v", err)
+	}
+	if cfg.BasePrompt == nil || *cfg.BasePrompt != "aw local base" {
+		t.Fatalf("expected aw local base prompt, got %#v", cfg.BasePrompt)
+	}
+	if cfg.WorkPromptSuffix == nil || *cfg.WorkPromptSuffix != "bdh global work" {
+		t.Fatalf("expected bdh global work suffix, got %#v", cfg.WorkPromptSuffix)
+	}
+	if cfg.CommsPromptSuffix == nil || *cfg.CommsPromptSuffix != "bdh local comms" {
+		t.Fatalf("expected bdh local comms suffix, got %#v", cfg.CommsPromptSuffix)
+	}
+	if cfg.WaitSeconds == nil || *cfg.WaitSeconds != 13 {
+		t.Fatalf("expected bdh global wait_seconds=13, got %#v", cfg.WaitSeconds)
+	}
+	if cfg.IdleWaitSeconds == nil || *cfg.IdleWaitSeconds != 14 {
+		t.Fatalf("expected bdh local idle_wait_seconds=14, got %#v", cfg.IdleWaitSeconds)
+	}
+	if cfg.CompactThreshold == nil || *cfg.CompactThreshold != 66 {
+		t.Fatalf("expected aw compact_threshold_pct=66, got %#v", cfg.CompactThreshold)
+	}
+	if len(cfg.Services) != 1 || cfg.Services[0].Name != "bdh-local" {
+		t.Fatalf("expected bdh local services to win, got %#v", cfg.Services)
+	}
+}
+
 func TestResolveRunSettingsPrecedence(t *testing.T) {
 	wait := 9
 	idleWait := 41
@@ -194,5 +282,15 @@ func TestResolveRunSettingsPromptFlagsOverrideConfig(t *testing.T) {
 	}
 	if settings.CompactThreshold != 55 {
 		t.Fatalf("expected compact threshold from flag, got %d", settings.CompactThreshold)
+	}
+}
+
+func TestResolveRunSettingsUsesBDHDefaultWorkPromptWhenUnset(t *testing.T) {
+	settings, err := resolveRunSettings(runUserConfig{}, false, "", false, "", false, "", false, 0, false, 0, false, 0)
+	if err != nil {
+		t.Fatalf("resolveRunSettings returned error: %v", err)
+	}
+	if settings.WorkPromptSuffix != defaultRunWorkPromptSuffix {
+		t.Fatalf("expected bdh work prompt default, got %q", settings.WorkPromptSuffix)
 	}
 }

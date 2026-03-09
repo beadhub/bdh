@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
+	awrun "github.com/awebai/aw/run"
 	"github.com/beadhub/bdh/internal/config"
 )
 
 const (
-	defaultRunWaitSeconds       = 20
-	defaultRunIdleWaitSeconds   = 30
-	defaultRunCompactThreshold  = 80
-	defaultRunBasePrompt        = ""
+	defaultRunWaitSeconds       = awrun.DefaultWaitSeconds
+	defaultRunIdleWaitSeconds   = awrun.DefaultIdleWaitSeconds
+	defaultRunCompactThreshold  = awrun.DefaultCompactThreshold
+	defaultRunBasePrompt        = awrun.DefaultBasePrompt
 	defaultRunWorkPromptSuffix  = "Before closing the bead, run a self-review or code-reviewer pass on your changes."
-	defaultRunCommsPromptSuffix = ""
+	defaultRunCommsPromptSuffix = awrun.DefaultCommsPrompt
 )
 
 type runUserConfig struct {
@@ -40,14 +40,27 @@ type runResolvedSettings struct {
 }
 
 func loadRunUserConfig() (runUserConfig, error) {
+	startDir, err := os.Getwd()
+	if err != nil {
+		return runUserConfig{}, err
+	}
+	// Precedence: aw defaults/global/local first, then bdh overlays.
+	cfg := fromAWRunUserConfig(awrun.UserConfig{})
+	awCfg, err := awrun.LoadUserConfig(startDir)
+	if err != nil {
+		return runUserConfig{}, err
+	}
+	cfg = mergeRunUserConfig(cfg, fromAWRunUserConfig(awCfg))
+
 	globalPath, err := runUserConfigPath()
 	if err != nil {
 		return runUserConfig{}, err
 	}
-	cfg, err := loadRunUserConfigFile(globalPath)
+	globalCfg, err := loadRunUserConfigFile(globalPath)
 	if err != nil {
 		return runUserConfig{}, err
 	}
+	cfg = mergeRunUserConfig(cfg, globalCfg)
 
 	localPath, err := runLocalUserConfigPath()
 	if err != nil {
@@ -136,72 +149,104 @@ func resolveRunSettings(
 	compactThresholdFlagSet bool,
 	compactThresholdFlagValue int,
 ) (runResolvedSettings, error) {
-	settings := runResolvedSettings{
-		BasePrompt:        defaultRunBasePrompt,
-		WorkPromptSuffix:  defaultRunWorkPromptSuffix,
-		CommsPromptSuffix: defaultRunCommsPromptSuffix,
-		WaitSeconds:       defaultRunWaitSeconds,
-		IdleWaitSeconds:   defaultRunIdleWaitSeconds,
-		CompactThreshold:  defaultRunCompactThreshold,
+	overrides := awrun.SettingOverrides{
+		BasePrompt:        changedRunSettingString(basePromptFlagSet, basePromptFlagValue),
+		WorkPromptSuffix:  changedRunSettingString(workPromptFlagSet, workPromptFlagValue),
+		CommsPromptSuffix: changedRunSettingString(commsPromptFlagSet, commsPromptFlagValue),
+		WaitSeconds:       changedRunSettingInt(waitFlagSet, waitFlagValue),
+		IdleWaitSeconds:   changedRunSettingInt(idleWaitFlagSet, idleWaitFlagValue),
+		CompactThreshold:  changedRunSettingInt(compactThresholdFlagSet, compactThresholdFlagValue),
+	}
+	// Keep bdh-specific work guidance unless config/flags explicitly set it.
+	if !workPromptFlagSet && cfg.WorkPromptSuffix == nil {
+		overrides.WorkPromptSuffix = changedRunSettingString(true, defaultRunWorkPromptSuffix)
 	}
 
-	if cfg.BasePrompt != nil {
-		settings.BasePrompt = *cfg.BasePrompt
+	settings, err := awrun.ResolveSettings(toAWRunUserConfig(cfg), overrides)
+	if err != nil {
+		return runResolvedSettings{}, err
 	}
-	if cfg.WorkPromptSuffix != nil {
-		settings.WorkPromptSuffix = *cfg.WorkPromptSuffix
-	}
-	if cfg.CommsPromptSuffix != nil {
-		settings.CommsPromptSuffix = *cfg.CommsPromptSuffix
-	}
-	if cfg.WaitSeconds != nil {
-		settings.WaitSeconds = *cfg.WaitSeconds
-	}
-	if cfg.IdleWaitSeconds != nil {
-		settings.IdleWaitSeconds = *cfg.IdleWaitSeconds
-	}
-	if cfg.CompactThreshold != nil {
-		settings.CompactThreshold = *cfg.CompactThreshold
-	}
-	if cfg.Services != nil {
-		settings.Services = append([]runServiceConfig(nil), cfg.Services...)
-	}
-	if basePromptFlagSet {
-		settings.BasePrompt = basePromptFlagValue
-	}
-	if workPromptFlagSet {
-		settings.WorkPromptSuffix = workPromptFlagValue
-	}
-	if commsPromptFlagSet {
-		settings.CommsPromptSuffix = commsPromptFlagValue
-	}
-	if waitFlagSet {
-		settings.WaitSeconds = waitFlagValue
-	}
-	if idleWaitFlagSet {
-		settings.IdleWaitSeconds = idleWaitFlagValue
-	}
-	if compactThresholdFlagSet {
-		settings.CompactThreshold = compactThresholdFlagValue
-	}
+	return fromAWRunSettings(settings), nil
+}
 
-	if settings.WaitSeconds < 0 {
-		return runResolvedSettings{}, fmt.Errorf("wait_seconds must be >= 0")
+func changedRunSettingString(flagSet bool, value string) *string {
+	if !flagSet {
+		return nil
 	}
-	if settings.IdleWaitSeconds < 0 {
-		return runResolvedSettings{}, fmt.Errorf("idle_wait_seconds must be >= 0")
-	}
-	if settings.CompactThreshold < 0 || settings.CompactThreshold > 100 {
-		return runResolvedSettings{}, fmt.Errorf("compact_threshold_pct must be between 0 and 100")
-	}
-	for _, service := range settings.Services {
-		if strings.TrimSpace(service.Name) == "" {
-			return runResolvedSettings{}, fmt.Errorf("services.name must be non-empty")
-		}
-		if strings.TrimSpace(service.Command) == "" {
-			return runResolvedSettings{}, fmt.Errorf("services[%s].command must be non-empty", service.Name)
-		}
-	}
+	result := value
+	return &result
+}
 
-	return settings, nil
+func changedRunSettingInt(flagSet bool, value int) *int {
+	if !flagSet {
+		return nil
+	}
+	result := value
+	return &result
+}
+
+func toAWRunUserConfig(cfg runUserConfig) awrun.UserConfig {
+	return awrun.UserConfig{
+		BasePrompt:        cfg.BasePrompt,
+		WorkPromptSuffix:  cfg.WorkPromptSuffix,
+		CommsPromptSuffix: cfg.CommsPromptSuffix,
+		WaitSeconds:       cfg.WaitSeconds,
+		IdleWaitSeconds:   cfg.IdleWaitSeconds,
+		CompactThreshold:  cfg.CompactThreshold,
+		Services:          toAWRunServices(cfg.Services),
+	}
+}
+
+func fromAWRunUserConfig(cfg awrun.UserConfig) runUserConfig {
+	return runUserConfig{
+		BasePrompt:        cfg.BasePrompt,
+		WorkPromptSuffix:  cfg.WorkPromptSuffix,
+		CommsPromptSuffix: cfg.CommsPromptSuffix,
+		WaitSeconds:       cfg.WaitSeconds,
+		IdleWaitSeconds:   cfg.IdleWaitSeconds,
+		CompactThreshold:  cfg.CompactThreshold,
+		Services:          fromAWRunServices(cfg.Services),
+	}
+}
+
+func fromAWRunSettings(settings awrun.Settings) runResolvedSettings {
+	return runResolvedSettings{
+		BasePrompt:        settings.BasePrompt,
+		WorkPromptSuffix:  settings.WorkPromptSuffix,
+		CommsPromptSuffix: settings.CommsPromptSuffix,
+		WaitSeconds:       settings.WaitSeconds,
+		IdleWaitSeconds:   settings.IdleWaitSeconds,
+		CompactThreshold:  settings.CompactThreshold,
+		Services:          fromAWRunServices(settings.Services),
+	}
+}
+
+func toAWRunServices(services []runServiceConfig) []awrun.ServiceConfig {
+	if services == nil {
+		return nil
+	}
+	converted := make([]awrun.ServiceConfig, 0, len(services))
+	for _, service := range services {
+		converted = append(converted, awrun.ServiceConfig{
+			Name:        service.Name,
+			Command:     service.Command,
+			Description: service.Description,
+		})
+	}
+	return converted
+}
+
+func fromAWRunServices(services []awrun.ServiceConfig) []runServiceConfig {
+	if services == nil {
+		return nil
+	}
+	converted := make([]runServiceConfig, 0, len(services))
+	for _, service := range services {
+		converted = append(converted, runServiceConfig{
+			Name:        service.Name,
+			Command:     service.Command,
+			Description: service.Description,
+		})
+	}
+	return converted
 }
