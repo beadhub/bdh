@@ -148,6 +148,7 @@ Future provider work will add more backends on top of the same loop.`,
 		if err != nil {
 			return err
 		}
+		initialPrompt := strings.TrimSpace(strings.Join(args, " "))
 
 		dispatchDefaults := runDispatchDefaults{
 			IdleWaitSeconds:      settings.IdleWaitSeconds,
@@ -173,6 +174,35 @@ Future provider work will add more backends on top of the same loop.`,
 				if stream, streamErr := newRunEventStreamClient(cfg.BeadhubURL); streamErr == nil {
 					wakeStream = stream
 				}
+			}
+		}
+		if shouldAutoInitRunConfig(isTTY(), initialPrompt, settings.BasePrompt, dispatcher != nil, cfgErr) {
+			fmt.Fprintln(cmd.OutOrStdout(), "info: run defaults are not configured yet; launching bdh :run --init setup.")
+			if err := initRunUserConfig(cmd.InOrStdin(), cmd.OutOrStdout(), runCfg); err != nil {
+				return err
+			}
+			runCfg, err = loadRunUserConfig()
+			if err != nil {
+				return err
+			}
+			settings, err = resolveRunSettings(
+				runCfg,
+				cmd.Flags().Changed("base-prompt"), runBasePrompt,
+				cmd.Flags().Changed("work-prompt-suffix"), runWorkPrompt,
+				cmd.Flags().Changed("comms-prompt-suffix"), runCommsPrompt,
+				cmd.Flags().Changed("wait"), runWaitSeconds,
+				cmd.Flags().Changed("idle-wait"), runIdleWait,
+				cmd.Flags().Changed("compact-threshold-pct"), runCompactPct,
+			)
+			if err != nil {
+				return err
+			}
+			dispatchDefaults = runDispatchDefaults{
+				IdleWaitSeconds:      settings.IdleWaitSeconds,
+				WorkPromptSuffix:     settings.WorkPromptSuffix,
+				CommsPromptSuffix:    settings.CommsPromptSuffix,
+				HasWorkPromptSuffix:  true,
+				HasCommsPromptSuffix: true,
 			}
 		}
 
@@ -215,7 +245,7 @@ Future provider work will add more backends on top of the same loop.`,
 		loop.ServiceSupervisor = awrun.NewServiceManager(func(line string) { fmt.Fprintln(cmd.OutOrStdout(), line) })
 
 		opts := awrun.LoopOptions{
-			InitialPrompt:       strings.TrimSpace(strings.Join(args, " ")),
+			InitialPrompt:       initialPrompt,
 			Prompt:              settings.BasePrompt,
 			WaitSeconds:         settings.WaitSeconds,
 			IdleWaitSeconds:     settings.IdleWaitSeconds,
@@ -235,6 +265,13 @@ Future provider work will add more backends on top of the same loop.`,
 		}
 		return err
 	},
+}
+
+func shouldAutoInitRunConfig(interactive bool, initialPrompt string, basePrompt string, hasDispatcher bool, cfgErr error) bool {
+	if !interactive || hasDispatcher || strings.TrimSpace(initialPrompt) != "" || strings.TrimSpace(basePrompt) != "" || cfgErr == nil {
+		return false
+	}
+	return strings.Contains(cfgErr.Error(), "no .beadhub file found")
 }
 
 func runLegacyRunLoop(
