@@ -159,12 +159,14 @@ Future provider work will add more backends on top of the same loop.`,
 
 		var dispatcher runDispatcher
 		var wakeStream runWakeStream
+		var awWakeStream awrun.WakeStream
 		inputPromptLabel := defaultRunInputPromptLabel
 		cfg, cfgErr := loadAndValidateConfig()
 		if cfgErr == nil {
 			inputPromptLabel = runIdentityPromptLabel(cfg.ProjectSlug, cfg.CanonicalOrigin, cfg.RepoOrigin, cfg.Alias)
-			if aw, awErr := newAwebClientRequired(cfg.BeadhubURL); awErr == nil {
-				dispatcher = newBeadhubRunDispatcher(cfg, aw, dispatchDefaults)
+			if awClient, awErr := newAwebClientRequired(cfg.BeadhubURL); awErr == nil {
+				dispatcher = newBeadhubRunDispatcher(cfg, awClient, dispatchDefaults)
+				awWakeStream = awrun.NewClientWakeStream(awClient)
 			}
 			if stream, streamErr := newRunEventStreamClient(cfg.BeadhubURL); streamErr == nil {
 				wakeStream = stream
@@ -198,12 +200,8 @@ Future provider work will add more backends on top of the same loop.`,
 		}
 		loop.Sleep = sleepWithContext
 		loop.Now = time.Now
-		if wakeStream != nil {
-			loop.WakeStream = &awRunWakeStreamAdapter{
-				inner: wakeStream,
-				now:   time.Now,
-				sleep: sleepWithContext,
-			}
+		if awWakeStream != nil {
+			loop.WakeStream = awWakeStream
 		}
 		loop.InputPromptLabel = inputPromptLabel
 		if screen != nil {
@@ -212,8 +210,7 @@ Future provider work will add more backends on top of the same loop.`,
 		if dispatcher != nil {
 			loop.Dispatch = &awRunDispatcherAdapter{inner: dispatcher}
 		}
-		serviceManager := newRunServiceManager(func(line string) { fmt.Fprintln(cmd.OutOrStdout(), line) })
-		loop.ServiceSupervisor = &awRunServiceSupervisorAdapter{inner: serviceManager}
+		loop.ServiceSupervisor = awrun.NewServiceManager(func(line string) { fmt.Fprintln(cmd.OutOrStdout(), line) })
 
 		opts := awrun.LoopOptions{
 			InitialPrompt:       strings.TrimSpace(strings.Join(args, " ")),
