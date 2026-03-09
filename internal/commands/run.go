@@ -547,6 +547,11 @@ func (l *runLoop) startWakeControlRelay(ctx context.Context) <-chan runControlEv
 						}
 						continue
 					}
+					if evt.Type == runWakeEventError {
+						l.handleWakeStreamErrorEvent(evt)
+						streamOpen = false
+						continue
+					}
 					control, ok := runControlEventFromWakeEvent(evt)
 					if !ok {
 						continue
@@ -566,7 +571,9 @@ func (l *runLoop) startWakeControlRelay(ctx context.Context) <-chan runControlEv
 					}
 					if err != nil && ctx.Err() == nil {
 						l.logf("active wake control stream failed: %v", err)
-						time.Sleep(500 * time.Millisecond)
+						if sleepErr := l.sleep(ctx, 500*time.Millisecond); sleepErr != nil {
+							return
+						}
 					}
 					streamOpen = false
 				case <-ctx.Done():
@@ -786,59 +793,89 @@ func (l *runLoop) waitForWorkEvents(ctx context.Context, waitSeconds int, state 
 	}
 
 	deadline := l.now().Add(time.Duration(waitSeconds) * time.Second)
-	events, errs := l.wakeStream.Stream(ctx, deadline)
 	l.setStatusLine("waiting for work")
 
 	for {
-		select {
-		case event := <-l.controlEvents():
-			l.applyControlEvent(event, state, false, nil)
-			if state.StopRequested {
-				return context.Canceled
-			}
-			if state.ExitConfirmPending {
-				if err := l.waitForExitConfirmation(ctx, state); err != nil {
-					return err
+		if !l.now().Before(deadline) {
+			return nil
+		}
+		events, errs := l.wakeStream.Stream(ctx, deadline)
+		reconnect := false
+
+	streamLoop:
+		for {
+			select {
+			case event := <-l.controlEvents():
+				l.applyControlEvent(event, state, false, nil)
+				if state.StopRequested {
+					return context.Canceled
 				}
-			}
-			if strings.TrimSpace(state.NextPrompt) != "" {
-				return nil
-			}
-			if state.Paused {
-				return l.waitWhilePaused(ctx, state)
-			}
-		case evt, ok := <-events:
-			if !ok {
-				events = nil
-				if errs == nil {
+				if state.ExitConfirmPending {
+					if err := l.waitForExitConfirmation(ctx, state); err != nil {
+						return err
+					}
+				}
+				if strings.TrimSpace(state.NextPrompt) != "" {
 					return nil
 				}
-				continue
-			}
-			if !l.shouldWakeForEvent(evt, state) {
-				l.logf("wake event ignored type=%s autofeed=%t", evt.Type, state.AutofeedBeads)
-				continue
-			}
-			l.logf("wake event type=%s task=%s from=%s", evt.Type, evt.TaskID, evt.FromAlias)
-			if l.handleImmediateWakeEvent(ctx, evt, state) {
-				return nil
-			}
-		case err, ok := <-errs:
-			if !ok {
-				errs = nil
-				if events == nil {
+				if state.Paused {
+					return l.waitWhilePaused(ctx, state)
+				}
+			case evt, ok := <-events:
+				if !ok {
+					events = nil
+					if errs == nil {
+						reconnect = l.now().Before(deadline)
+						break streamLoop
+					}
+					continue
+				}
+				if evt.Type == runWakeEventError {
+					l.handleWakeStreamErrorEvent(evt)
+					return l.idleWithControlsLabel(ctx, l.remainingWaitSeconds(deadline), state, "waiting for work")
+				}
+				if !l.shouldWakeForEvent(evt, state) {
+					l.logf("wake event ignored type=%s autofeed=%t", evt.Type, state.AutofeedBeads)
+					continue
+				}
+				l.logf("wake event type=%s task=%s from=%s", evt.Type, evt.TaskID, evt.FromAlias)
+				if l.handleImmediateWakeEvent(ctx, evt, state) {
 					return nil
 				}
-				continue
+			case err, ok := <-errs:
+				if !ok {
+					errs = nil
+					if events == nil {
+						reconnect = l.now().Before(deadline)
+						break streamLoop
+					}
+					continue
+				}
+				if err == nil || ctx.Err() != nil {
+					return nil
+				}
+				l.logf("event stream wait failed: %v", err)
+				l.println(fmt.Sprintf("info: event stream failed: %v", err))
+				return l.idleWithControlsLabel(ctx, l.remainingWaitSeconds(deadline), state, "waiting for work")
+			case <-ctx.Done():
+				return ctx.Err()
 			}
-			if err == nil || ctx.Err() != nil {
-				return nil
-			}
-			l.logf("event stream wait failed: %v", err)
-			l.println(fmt.Sprintf("info: event stream failed: %v", err))
-			return l.idleWithControlsLabel(ctx, waitSeconds, state, "waiting for work")
-		case <-ctx.Done():
-			return ctx.Err()
+		}
+
+		if !reconnect {
+			return nil
+		}
+		backoff := time.Second
+		remaining := deadline.Sub(l.now())
+		if remaining <= 0 {
+			return nil
+		}
+		if remaining < backoff {
+			backoff = remaining
+		}
+		l.logf("event stream closed before deadline; reconnecting in %s", backoff)
+		if err := l.sleep(ctx, backoff); err != nil {
+			return err
 		}
 	}
 }
@@ -876,6 +913,27 @@ func (l *runLoop) handleImmediateWakeEvent(ctx context.Context, evt runWakeEvent
 	default:
 		return true
 	}
+}
+
+func (l *runLoop) handleWakeStreamErrorEvent(evt runWakeEvent) {
+	text := strings.TrimSpace(evt.Text)
+	if text == "" {
+		text = "event stream signaled an error"
+	}
+	l.logf("event stream error event=%q", text)
+	l.println("info: " + text)
+}
+
+func (l *runLoop) remainingWaitSeconds(deadline time.Time) int {
+	remaining := deadline.Sub(l.now())
+	if remaining <= 0 {
+		return 0
+	}
+	seconds := int((remaining + time.Second - time.Nanosecond) / time.Second)
+	if seconds < 1 {
+		return 1
+	}
+	return seconds
 }
 
 func (l *runLoop) waitWhilePaused(ctx context.Context, state *runState) error {

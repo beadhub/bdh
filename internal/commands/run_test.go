@@ -23,6 +23,10 @@ type fakeRunWakeStream struct {
 	errs   chan error
 }
 
+type fakeClosingRunWakeStream struct {
+	calls int
+}
+
 func newFakeRunInputController() *fakeRunInputController {
 	return &fakeRunInputController{events: make(chan runControlEvent, 32)}
 }
@@ -53,6 +57,15 @@ func (f *fakeRunInputController) setPending(pending bool) {
 
 func (f *fakeRunWakeStream) Stream(context.Context, time.Time) (<-chan runWakeEvent, <-chan error) {
 	return f.events, f.errs
+}
+
+func (f *fakeClosingRunWakeStream) Stream(context.Context, time.Time) (<-chan runWakeEvent, <-chan error) {
+	f.calls++
+	events := make(chan runWakeEvent)
+	errs := make(chan error)
+	close(events)
+	close(errs)
+	return events, errs
 }
 
 func TestRunLoopStartsFreshThenKeepsExactSessionWithoutContinueMode(t *testing.T) {
@@ -479,6 +492,65 @@ func TestWaitForWorkFallsBackToCountdownWhenStreamFails(t *testing.T) {
 	}
 }
 
+func TestWaitForWorkReconnectsOnEarlyCleanCloseUntilDeadline(t *testing.T) {
+	stream := &fakeClosingRunWakeStream{}
+	current := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	var slept []time.Duration
+
+	loop := &runLoop{
+		out:        io.Discard,
+		wakeStream: stream,
+		now:        func() time.Time { return current },
+		sleep: func(_ context.Context, d time.Duration) error {
+			slept = append(slept, d)
+			current = current.Add(d)
+			return nil
+		},
+	}
+	state := &runState{}
+
+	if err := loop.waitForWork(context.Background(), 2, state); err != nil {
+		t.Fatalf("waitForWork returned error: %v", err)
+	}
+	if stream.calls < 2 {
+		t.Fatalf("expected multiple stream attempts before deadline, got %d", stream.calls)
+	}
+	if len(slept) == 0 {
+		t.Fatal("expected reconnect backoff sleeps before deadline")
+	}
+}
+
+func TestWaitForWorkSurfacesInBandErrorEvent(t *testing.T) {
+	stream := newFakeRunWakeStream()
+	var output strings.Builder
+	var slept []time.Duration
+
+	loop := &runLoop{
+		out:        &output,
+		wakeStream: stream,
+		now:        time.Now,
+		sleep: func(_ context.Context, d time.Duration) error {
+			slept = append(slept, d)
+			return nil
+		},
+	}
+	state := &runState{}
+
+	stream.events <- runWakeEvent{Type: runWakeEventError, Text: `{"detail":"upstream failed"}`}
+	close(stream.events)
+	close(stream.errs)
+
+	if err := loop.waitForWork(context.Background(), 2, state); err != nil {
+		t.Fatalf("waitForWork returned error: %v", err)
+	}
+	if !strings.Contains(output.String(), "upstream failed") {
+		t.Fatalf("expected in-band error event to be surfaced, got %q", output.String())
+	}
+	if len(slept) == 0 {
+		t.Fatal("expected countdown fallback after in-band error event")
+	}
+}
+
 func TestExecuteRunInterruptsOnWakeControlEvent(t *testing.T) {
 	stream := newFakeRunWakeStream()
 	runStarted := make(chan struct{})
@@ -571,6 +643,34 @@ func TestExecuteRunPauseWakeEventMapsToPauseAfterRun(t *testing.T) {
 	}
 	if state.Paused {
 		t.Fatalf("expected pause event not to cancel active run immediately, got %#v", state)
+	}
+}
+
+func TestStartWakeControlRelaySurfacesErrorEvent(t *testing.T) {
+	stream := newFakeRunWakeStream()
+	var output strings.Builder
+
+	loop := &runLoop{
+		out:        &output,
+		wakeStream: stream,
+		now:        time.Now,
+		sleep:      func(context.Context, time.Duration) error { return nil },
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	relay := loop.startWakeControlRelay(ctx)
+
+	stream.events <- runWakeEvent{Type: runWakeEventError, Text: `{"detail":"relay failed"}`}
+	close(stream.events)
+	close(stream.errs)
+
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	for range relay {
+	}
+
+	if !strings.Contains(output.String(), "relay failed") {
+		t.Fatalf("expected active relay to surface in-band error event, got %q", output.String())
 	}
 }
 
