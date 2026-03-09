@@ -23,6 +23,10 @@ func initRunUserConfig(in io.Reader, out io.Writer, existing runUserConfig) erro
 		return err
 	}
 	current = applySuggestedRunInitDefaults(existing, current)
+	globalCfg, err := loadRunGlobalUserConfig()
+	if err != nil {
+		return err
+	}
 
 	fmt.Fprintln(out, "Configuring bdh :run. Press Enter to keep the current value. Enter '-' to clear a string field.")
 
@@ -58,6 +62,7 @@ func initRunUserConfig(in io.Reader, out io.Writer, existing runUserConfig) erro
 		WaitSeconds:       waitSeconds,
 		IdleWaitSeconds:   idleWaitSeconds,
 		CompactThreshold:  compactThreshold,
+		Services:          append([]runServiceConfig(nil), globalCfg.Services...),
 	}
 	path, err := writeRunUserConfig(cfg)
 	if err != nil {
@@ -66,6 +71,14 @@ func initRunUserConfig(in io.Reader, out io.Writer, existing runUserConfig) erro
 
 	fmt.Fprintf(out, "Wrote %s\n", path)
 	return nil
+}
+
+func loadRunGlobalUserConfig() (runUserConfig, error) {
+	path, err := runUserConfigPath()
+	if err != nil {
+		return runUserConfig{}, err
+	}
+	return loadRunUserConfigFile(path)
 }
 
 func applySuggestedRunInitDefaults(existing runUserConfig, current runResolvedSettings) runResolvedSettings {

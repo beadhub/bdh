@@ -3,6 +3,8 @@ package commands
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -91,5 +93,48 @@ func TestPromptRunConfigStringClearsOnDash(t *testing.T) {
 	}
 	if value == nil || *value != "" {
 		t.Fatalf("expected cleared string, got %#v", value)
+	}
+}
+
+func TestInitRunUserConfigPreservesGlobalServices(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	path := filepath.Join(dir, ".config", "beadhub", "run.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	seed := runUserConfig{
+		Services: []runServiceConfig{
+			{
+				Name:        "api",
+				Command:     "make run-api",
+				Description: "HTTP API server",
+			},
+		},
+	}
+	data, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatalf("marshal seed config: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write seed config: %v", err)
+	}
+
+	input := strings.NewReader("\n\n\n\n\n\n")
+	var output bytes.Buffer
+	if err := initRunUserConfig(input, &output, runUserConfig{}); err != nil {
+		t.Fatalf("initRunUserConfig returned error: %v", err)
+	}
+
+	cfg, err := loadRunUserConfigFile(path)
+	if err != nil {
+		t.Fatalf("loadRunUserConfigFile returned error: %v", err)
+	}
+	if len(cfg.Services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(cfg.Services))
+	}
+	if cfg.Services[0].Name != "api" || cfg.Services[0].Command != "make run-api" {
+		t.Fatalf("expected preserved service, got %#v", cfg.Services[0])
 	}
 }
