@@ -178,10 +178,9 @@ Future provider work will add more backends on top of the same loop.`,
 			return runLegacyRunLoop(cmd, ctx, args, settings, dispatcher, wakeStream, inputPromptLabel, runDebug)
 		}
 
-		screen := newRunScreenManager(cmd.InOrStdin(), cmd.OutOrStdout())
+		screen := awrun.NewScreenController(cmd.InOrStdin(), cmd.OutOrStdout())
 		if screen != nil {
-			screen.promptLabel = inputPromptLabel
-			screen.inputLine = inputPromptLabel
+			screen.SetPromptLabel(inputPromptLabel)
 		}
 
 		provider, err := awrun.NewProvider(runProviderName)
@@ -208,7 +207,7 @@ Future provider work will add more backends on top of the same loop.`,
 		}
 		loop.InputPromptLabel = inputPromptLabel
 		if screen != nil {
-			loop.Control = &awRunInputControllerAdapter{inner: screen}
+			loop.Control = screen
 		}
 		if dispatcher != nil {
 			loop.Dispatch = &awRunDispatcherAdapter{inner: dispatcher}
