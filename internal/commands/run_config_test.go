@@ -3,6 +3,7 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	awconfig "github.com/awebai/aw/awconfig"
@@ -63,6 +64,38 @@ func TestLoadRunUserConfigReadsFile(t *testing.T) {
 	}
 	if len(cfg.Services) != 0 {
 		t.Fatalf("expected no services, got %#v", cfg.Services)
+	}
+}
+
+func TestLoadRunUserConfigFailsOnMalformedAWConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	oldPath := config.GetPath()
+	config.SetPath("")
+	t.Cleanup(func() { config.SetPath(oldPath) })
+
+	awPath := filepath.Join(dir, ".config", "aw", "run.json")
+	if err := os.MkdirAll(filepath.Dir(awPath), 0o755); err != nil {
+		t.Fatalf("mkdir aw config dir failed: %v", err)
+	}
+	if err := os.WriteFile(awPath, []byte("{ malformed"), 0o600); err != nil {
+		t.Fatalf("write malformed aw config failed: %v", err)
+	}
+
+	bdhPath := filepath.Join(dir, ".config", "beadhub", "run.json")
+	if err := os.MkdirAll(filepath.Dir(bdhPath), 0o755); err != nil {
+		t.Fatalf("mkdir bdh config dir failed: %v", err)
+	}
+	if err := os.WriteFile(bdhPath, []byte(`{"base_prompt":"valid bdh prompt"}`), 0o600); err != nil {
+		t.Fatalf("write bdh config failed: %v", err)
+	}
+
+	_, err := loadRunUserConfig()
+	if err == nil {
+		t.Fatal("expected loadRunUserConfig to fail on malformed aw config")
+	}
+	if !strings.Contains(err.Error(), awPath) {
+		t.Fatalf("expected aw config path in error, got %v", err)
 	}
 }
 

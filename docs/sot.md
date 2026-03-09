@@ -23,6 +23,11 @@ Client-side tool. Talks to the BeadHub server API over HTTP. Identity derived fr
 - `internal/config/` — Configuration loading from `.beadhub` file
 - Policy caching: 60s TTL in `.beadhub-cache/` to avoid hitting the server on every `bdh` invocation
 
+## Run Config Behavior
+
+- `bdh :run` uses `aw` run config as the generic base (`~/.config/aw/run.json` + local `.aw/run.json`) and then applies bdh overlays (`~/.config/beadhub/run.json` + local `.beadhub-run.json`).
+- Malformed `aw` run config is a fail-fast error by design (parity with `aw`), not a silently ignored condition.
+
 ## Release
 
 GoReleaser on git tags. Workflow: `.github/workflows/bdh-release.yml`. Produces binaries for multiple platforms.
