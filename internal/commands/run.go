@@ -156,6 +156,7 @@ Future provider work will add more backends on top of the same loop.`,
 			HasWorkPromptSuffix:  true,
 			HasCommsPromptSuffix: true,
 		}
+		runDebug := resolveRunDebugMode(cmd.Flags().Changed("debug"), runDebugMode)
 
 		var dispatcher runDispatcher
 		var wakeStream runWakeStream
@@ -168,14 +169,15 @@ Future provider work will add more backends on top of the same loop.`,
 				dispatcher = newBeadhubRunDispatcher(cfg, awClient, dispatchDefaults)
 				awWakeStream = awrun.NewClientWakeStream(awClient)
 			}
-			if stream, streamErr := newRunEventStreamClient(cfg.BeadhubURL); streamErr == nil {
-				wakeStream = stream
+			if runDebug {
+				if stream, streamErr := newRunEventStreamClient(cfg.BeadhubURL); streamErr == nil {
+					wakeStream = stream
+				}
 			}
 		}
 
 		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 		defer stop()
-		runDebug := resolveRunDebugMode(cmd.Flags().Changed("debug"), runDebugMode)
 		if runDebug {
 			return runLegacyRunLoop(cmd, ctx, args, settings, dispatcher, wakeStream, inputPromptLabel, runDebug)
 		}
