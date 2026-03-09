@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	awrun "github.com/awebai/aw/run"
 	"github.com/spf13/cobra"
 )
 
@@ -148,7 +149,7 @@ Future provider work will add more backends on top of the same loop.`,
 			return err
 		}
 
-		provider, err := newRunProvider(runProviderName)
+		provider, err := awrun.NewProvider(runProviderName)
 		if err != nil {
 			return err
 		}
@@ -162,16 +163,14 @@ Future provider work will add more backends on top of the same loop.`,
 		}
 
 		var dispatcher runDispatcher
-		var wakeStream runWakeStream
+		var wakeStream awrun.WakeStream
 		inputPromptLabel := defaultRunInputPromptLabel
 		cfg, cfgErr := loadAndValidateConfig()
 		if cfgErr == nil {
 			inputPromptLabel = runIdentityPromptLabel(cfg.ProjectSlug, cfg.CanonicalOrigin, cfg.RepoOrigin, cfg.Alias)
 			if aw, awErr := newAwebClientRequired(cfg.BeadhubURL); awErr == nil {
 				dispatcher = newBeadhubRunDispatcher(cfg, aw, dispatchDefaults)
-			}
-			if stream, streamErr := newRunEventStreamClient(cfg.BeadhubURL); streamErr == nil {
-				wakeStream = stream
+				wakeStream = awrun.NewClientWakeStream(aw)
 			}
 		}
 
@@ -184,33 +183,43 @@ Future provider work will add more backends on top of the same loop.`,
 			screen.inputLine = inputPromptLabel
 		}
 
-		loop := &runLoop{
-			provider:         provider,
-			runner:           realRunCommand,
-			sleep:            sleepWithContext,
-			wakeStream:       wakeStream,
-			now:              time.Now,
-			out:              cmd.OutOrStdout(),
-			control:          screen,
-			dispatch:         dispatcher,
-			defaults:         dispatchDefaults,
-			screen:           screen,
-			inputPromptLabel: inputPromptLabel,
+		loop := awrun.NewLoop(provider, cmd.OutOrStdout())
+		loop.Runner = func(ctx context.Context, dir string, argv []string, onLine func(string), stderrSink any) error {
+			var sink io.Writer
+			if writer, ok := stderrSink.(io.Writer); ok {
+				sink = writer
+			}
+			return realRunCommand(ctx, dir, argv, onLine, sink)
 		}
+		loop.Sleep = sleepWithContext
+		loop.Now = time.Now
+		loop.WakeStream = wakeStream
+		loop.InputPromptLabel = inputPromptLabel
+		if screen != nil {
+			loop.Control = &awRunInputControllerAdapter{inner: screen}
+		}
+		if dispatcher != nil {
+			loop.Dispatch = &awRunDispatcherAdapter{inner: dispatcher}
+		}
+		if runDebug := resolveRunDebugMode(cmd.Flags().Changed("debug"), runDebugMode); runDebug {
+			fmt.Fprintln(cmd.OutOrStdout(), "info: debug logs are not yet wired in the aw-backed :run path")
+		}
+		serviceManager := newRunServiceManager(func(line string) { fmt.Fprintln(cmd.OutOrStdout(), line) })
+		loop.ServiceSupervisor = &awRunServiceSupervisorAdapter{inner: serviceManager}
 
-		opts := runLoopOptions{
+		opts := awrun.LoopOptions{
 			InitialPrompt:       strings.TrimSpace(strings.Join(args, " ")),
 			Prompt:              settings.BasePrompt,
 			WaitSeconds:         settings.WaitSeconds,
+			IdleWaitSeconds:     settings.IdleWaitSeconds,
 			MaxRuns:             runMaxRuns,
-			AutofeedBeads:       runAutofeedBeads,
+			Autofeed:            runAutofeedBeads,
 			ContinueMode:        runContinueMode,
 			WorkingDir:          runWorkingDir,
 			AllowedTools:        runAllowedTools,
 			Model:               runModel,
 			CompactThresholdPct: settings.CompactThreshold,
-			Services:            settings.Services,
-			Debug:               resolveRunDebugMode(cmd.Flags().Changed("debug"), runDebugMode),
+			Services:            toAWRunServices(settings.Services),
 		}
 
 		err = loop.Run(ctx, opts)
