@@ -28,6 +28,12 @@ Client-side tool. Talks to the BeadHub server API over HTTP. Identity derived fr
 - `bdh :run` uses `aw` run config as the generic base (`~/.config/aw/run.json` + local `.aw/run.json`) and then applies bdh overlays (`~/.config/beadhub/run.json` + local `.beadhub-run.json`).
 - Malformed `aw` run config is a fail-fast error by design (parity with `aw`), not a silently ignored condition.
 
+## Run Runtime Ownership
+
+- Default `bdh :run` runtime is owned by `aw/run` (provider protocol parsing, loop control flow, wake stream retry behavior, TTY screen controller, and service supervision).
+- `bdh` owns bead-specific behavior on top of that runtime: dispatch prioritization (chat/mail/claim/ready), autofeed policy, and coordination-oriented prompt shaping.
+- `--debug` keeps a legacy local loop for diagnostics while migration cleanup is in progress.
+
 ## Release
 
 GoReleaser on git tags. Workflow: `.github/workflows/bdh-release.yml`. Produces binaries for multiple platforms.

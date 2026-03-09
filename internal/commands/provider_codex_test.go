@@ -139,15 +139,3 @@ func TestCodexProviderParseOutput(t *testing.T) {
 		t.Fatalf("did not expect usage from codex stdout turn.completed event, got %#v", doneEvent.Usage)
 	}
 }
-
-func TestCodexDisplayCommandStripsShellWrapper(t *testing.T) {
-	got := codexDisplayCommand(`/bin/bash -lc "go test ./... 2>&1"`)
-	if got != "go test ./... 2>&1" {
-		t.Fatalf("unexpected stripped command: %q", got)
-	}
-
-	got = codexDisplayCommand(`/bin/zsh -lc 'pwd'`)
-	if got != "pwd" {
-		t.Fatalf("unexpected stripped single-quoted command: %q", got)
-	}
-}
