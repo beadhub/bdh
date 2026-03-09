@@ -149,11 +149,6 @@ Future provider work will add more backends on top of the same loop.`,
 			return err
 		}
 
-		provider, err := awrun.NewProvider(runProviderName)
-		if err != nil {
-			return err
-		}
-
 		dispatchDefaults := runDispatchDefaults{
 			IdleWaitSeconds:      settings.IdleWaitSeconds,
 			WorkPromptSuffix:     settings.WorkPromptSuffix,
@@ -163,24 +158,35 @@ Future provider work will add more backends on top of the same loop.`,
 		}
 
 		var dispatcher runDispatcher
-		var wakeStream awrun.WakeStream
+		var wakeStream runWakeStream
 		inputPromptLabel := defaultRunInputPromptLabel
 		cfg, cfgErr := loadAndValidateConfig()
 		if cfgErr == nil {
 			inputPromptLabel = runIdentityPromptLabel(cfg.ProjectSlug, cfg.CanonicalOrigin, cfg.RepoOrigin, cfg.Alias)
 			if aw, awErr := newAwebClientRequired(cfg.BeadhubURL); awErr == nil {
 				dispatcher = newBeadhubRunDispatcher(cfg, aw, dispatchDefaults)
-				wakeStream = awrun.NewClientWakeStream(aw)
+			}
+			if stream, streamErr := newRunEventStreamClient(cfg.BeadhubURL); streamErr == nil {
+				wakeStream = stream
 			}
 		}
 
 		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 		defer stop()
+		runDebug := resolveRunDebugMode(cmd.Flags().Changed("debug"), runDebugMode)
+		if runDebug {
+			return runLegacyRunLoop(cmd, ctx, args, settings, dispatcher, wakeStream, inputPromptLabel, runDebug)
+		}
 
 		screen := newRunScreenManager(cmd.InOrStdin(), cmd.OutOrStdout())
 		if screen != nil {
 			screen.promptLabel = inputPromptLabel
 			screen.inputLine = inputPromptLabel
+		}
+
+		provider, err := awrun.NewProvider(runProviderName)
+		if err != nil {
+			return err
 		}
 
 		loop := awrun.NewLoop(provider, cmd.OutOrStdout())
@@ -193,16 +199,19 @@ Future provider work will add more backends on top of the same loop.`,
 		}
 		loop.Sleep = sleepWithContext
 		loop.Now = time.Now
-		loop.WakeStream = wakeStream
+		if wakeStream != nil {
+			loop.WakeStream = &awRunWakeStreamAdapter{
+				inner: wakeStream,
+				now:   time.Now,
+				sleep: sleepWithContext,
+			}
+		}
 		loop.InputPromptLabel = inputPromptLabel
 		if screen != nil {
 			loop.Control = &awRunInputControllerAdapter{inner: screen}
 		}
 		if dispatcher != nil {
 			loop.Dispatch = &awRunDispatcherAdapter{inner: dispatcher}
-		}
-		if runDebug := resolveRunDebugMode(cmd.Flags().Changed("debug"), runDebugMode); runDebug {
-			fmt.Fprintln(cmd.OutOrStdout(), "info: debug logs are not yet wired in the aw-backed :run path")
 		}
 		serviceManager := newRunServiceManager(func(line string) { fmt.Fprintln(cmd.OutOrStdout(), line) })
 		loop.ServiceSupervisor = &awRunServiceSupervisorAdapter{inner: serviceManager}
@@ -228,6 +237,71 @@ Future provider work will add more backends on top of the same loop.`,
 		}
 		return err
 	},
+}
+
+func runLegacyRunLoop(
+	cmd *cobra.Command,
+	ctx context.Context,
+	args []string,
+	settings runResolvedSettings,
+	dispatcher runDispatcher,
+	wakeStream runWakeStream,
+	inputPromptLabel string,
+	runDebug bool,
+) error {
+	provider, err := newRunProvider(runProviderName)
+	if err != nil {
+		return err
+	}
+
+	screen := newRunScreenManager(cmd.InOrStdin(), cmd.OutOrStdout())
+	if screen != nil {
+		screen.promptLabel = inputPromptLabel
+		screen.inputLine = inputPromptLabel
+	}
+
+	dispatchDefaults := runDispatchDefaults{
+		IdleWaitSeconds:      settings.IdleWaitSeconds,
+		WorkPromptSuffix:     settings.WorkPromptSuffix,
+		CommsPromptSuffix:    settings.CommsPromptSuffix,
+		HasWorkPromptSuffix:  true,
+		HasCommsPromptSuffix: true,
+	}
+
+	loop := &runLoop{
+		provider:         provider,
+		runner:           realRunCommand,
+		sleep:            sleepWithContext,
+		wakeStream:       wakeStream,
+		now:              time.Now,
+		out:              cmd.OutOrStdout(),
+		control:          screen,
+		dispatch:         dispatcher,
+		defaults:         dispatchDefaults,
+		screen:           screen,
+		inputPromptLabel: inputPromptLabel,
+	}
+
+	opts := runLoopOptions{
+		InitialPrompt:       strings.TrimSpace(strings.Join(args, " ")),
+		Prompt:              settings.BasePrompt,
+		WaitSeconds:         settings.WaitSeconds,
+		MaxRuns:             runMaxRuns,
+		AutofeedBeads:       runAutofeedBeads,
+		ContinueMode:        runContinueMode,
+		WorkingDir:          runWorkingDir,
+		AllowedTools:        runAllowedTools,
+		Model:               runModel,
+		CompactThresholdPct: settings.CompactThreshold,
+		Services:            settings.Services,
+		Debug:               runDebug,
+	}
+
+	err = loop.Run(ctx, opts)
+	if err == nil || err == context.Canceled {
+		return nil
+	}
+	return err
 }
 
 func init() {
