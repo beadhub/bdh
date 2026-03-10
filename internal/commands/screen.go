@@ -7,12 +7,15 @@ import (
 	"sync"
 	"time"
 
+	awrun "github.com/awebai/aw/run"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 )
+
+var _ awrun.UI = (*runScreenManager)(nil)
 
 type runScreenManager struct {
 	inputFile   *os.File
@@ -267,6 +270,9 @@ func (s *runScreenManager) ClearInputLine() {
 	s.SetInputLine(s.promptLabel)
 }
 
+// SetPromptLabel must be called before Start. Calling it after the Bubble Tea
+// program is running updates the manager's state but does not propagate the
+// label change into the live model's textarea prompt function.
 func (s *runScreenManager) SetPromptLabel(label string) {
 	if s == nil {
 		return
@@ -281,12 +287,7 @@ func (s *runScreenManager) SetPromptLabel(label string) {
 	if s.inputLine == "" || s.inputLine == defaultRunInputPromptLabel || s.inputLine == previousPrompt {
 		s.inputLine = label
 	}
-	program := s.program
 	s.mu.Unlock()
-
-	if program != nil {
-		program.Send(runScreenSetInputMsg(""))
-	}
 }
 
 func (s *runScreenManager) SetFooterIdentity(identity string) {
@@ -572,6 +573,8 @@ func (m runScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setFocus(runScreenFocusInput)
 				return m, nil
 			default:
+				// Returns focus to input and falls through to the input
+				// handling below so the keystroke is typed into the textarea.
 				m.setFocus(runScreenFocusInput)
 			}
 		} else {
@@ -668,13 +671,6 @@ func (m runScreenModel) formattedOutputLines() []string {
 		lines = appendWrappedStyledRunScreenLine(lines, m.current, m.width, m.styles)
 	}
 	return lines
-}
-
-func (m runScreenModel) statusText() string {
-	if strings.TrimSpace(m.statusLine) == "" {
-		return ""
-	}
-	return truncateRunText(strings.TrimSpace(m.statusLine), max(1, m.width-2))
 }
 
 func (m *runScreenModel) setFocus(focus runScreenFocus) {

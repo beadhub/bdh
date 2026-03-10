@@ -24,6 +24,7 @@ const (
 	runControlExitPrompt    runControlEventType = awrun.ControlExitPrompt
 	runControlExitConfirm   runControlEventType = awrun.ControlExitConfirm
 	runControlExitCancel    runControlEventType = awrun.ControlExitCancel
+	runControlStreamError   runControlEventType = awrun.ControlStreamError
 )
 
 type runControlEvent = awrun.ControlEvent
