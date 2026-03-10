@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 func TestAppendRunScreenTextTracksCompleteAndPartialLines(t *testing.T) {
@@ -113,10 +112,24 @@ func TestRunScreenSetInputLineKeepsLeadingSpace(t *testing.T) {
 	}
 }
 
-func TestRunIdentityPromptLabelUsesProjectRepoAndAlias(t *testing.T) {
-	got := runIdentityPromptLabel("beadhub", "github.com/beadhub/bdh", "", "noah")
-	if got != "beadhub:bdh:noah> " {
-		t.Fatalf("expected identity prompt label, got %q", got)
+func TestRunStatusIdentityLabelFormatsProviderProjectRepoAlias(t *testing.T) {
+	got := runStatusIdentityLabel("claude", "beadhub", "github.com/beadhub/bdh", "", "noah")
+	if got != "[claude]@beadhub:bdh:noah" {
+		t.Fatalf("expected footer identity, got %q", got)
+	}
+}
+
+func TestRunStatusIdentityLabelOmitsRepoWhenEmpty(t *testing.T) {
+	got := runStatusIdentityLabel("claude", "beadhub", "", "", "noah")
+	if got != "[claude]@beadhub:noah" {
+		t.Fatalf("expected identity without repo, got %q", got)
+	}
+}
+
+func TestRunStatusIdentityLabelFallsBackToProviderOnly(t *testing.T) {
+	got := runStatusIdentityLabel("claude", "", "", "", "")
+	if got != "[claude]" {
+		t.Fatalf("expected provider-only identity, got %q", got)
 	}
 }
 
@@ -156,8 +169,9 @@ func TestRunScreenViewAddsBottomBreathingSpace(t *testing.T) {
 		runScreenSnapshot{
 			Lines:       []string{"line 1"},
 			StatusLine:  "next run in 6s",
-			InputLine:   "beadhub:bdh:noah> hello",
-			PromptLabel: "beadhub:bdh:noah> ",
+			InputLine:   ">> hello",
+			PromptLabel: ">> ",
+			FooterID:    "[claude]@beadhub:bdh:noah",
 		},
 		nil,
 		nil,
@@ -171,11 +185,14 @@ func TestRunScreenViewAddsBottomBreathingSpace(t *testing.T) {
 	model.syncLayout()
 
 	view := model.View()
-	if !strings.Contains(view, "\n\n next run in 6s") {
-		t.Fatalf("expected blank line before status line, got %q", view)
+	if !strings.Contains(view, "\n────────────────────────────────────────\n") {
+		t.Fatalf("expected divider above input, got %q", view)
 	}
-	if !strings.Contains(view, "next run in 6s") || !strings.Contains(view, "\n\nbeadhub:bdh:noah> hello") {
-		t.Fatalf("expected blank line between status and input, got %q", view)
+	if !strings.Contains(view, ">> hello") {
+		t.Fatalf("expected input below divider, got %q", view)
+	}
+	if !strings.Contains(view, "[claude]@beadhub:bdh:noah") || !strings.Contains(view, "running") {
+		t.Fatalf("expected footer identity and status at bottom, got %q", view)
 	}
 }
 
@@ -186,13 +203,13 @@ func TestRunInputVisualHeightWrapsLongInput(t *testing.T) {
 	}
 }
 
-func TestRunScreenViewGrowsInputFooterWhenInputWraps(t *testing.T) {
+func TestRunScreenViewKeepsInputAtFixedHeight(t *testing.T) {
 	model := newRunScreenModel(
 		runScreenSnapshot{
 			Lines:       []string{"line 1", "line 2"},
 			StatusLine:  "next run in 6s",
-			InputLine:   "beadhub:bdh:noah> " + strings.Repeat("x", 40),
-			PromptLabel: "beadhub:bdh:noah> ",
+			InputLine:   ">> " + strings.Repeat("x", 40),
+			PromptLabel: ">> ",
 		},
 		nil,
 		nil,
@@ -205,28 +222,29 @@ func TestRunScreenViewGrowsInputFooterWhenInputWraps(t *testing.T) {
 	model.height = 10
 	model.syncLayout()
 
-	if model.input.Height() < 2 {
-		t.Fatalf("expected multi-line input height, got %d", model.input.Height())
+	if model.input.Height() != 2 {
+		t.Fatalf("expected fixed two-line input height, got %d", model.input.Height())
 	}
-	if model.viewport.Height >= 6 {
-		t.Fatalf("expected viewport to shrink for wrapped input, got %d", model.viewport.Height)
+	if model.viewport.Height != 6 {
+		t.Fatalf("expected viewport height to account for divider, input, and footer, got %d", model.viewport.Height)
 	}
 
 	view := model.View()
-	if !strings.Contains(view, "next run in 6s") {
+	if !strings.Contains(view, "running") {
 		t.Fatalf("expected status line in view, got %q", view)
 	}
-	if !strings.Contains(view, "beadhub:bdh:noah> ") {
+	if !strings.Contains(view, ">> ") {
 		t.Fatalf("expected prompt label in view, got %q", view)
 	}
 }
 
-func TestRunScreenViewKeepsFirstWrappedInputLineVisibleDuringTyping(t *testing.T) {
+func TestRunScreenArrowUpMovesFocusToViewport(t *testing.T) {
 	model := newRunScreenModel(
 		runScreenSnapshot{
-			StatusLine:  "paused: /resume, /quit, or type a prompt",
-			InputLine:   "beadhub:bdh:noah> ",
-			PromptLabel: "beadhub:bdh:noah> ",
+			Lines:       []string{"line 1", "line 2", "line 3", "line 4", "line 5", "line 6", "line 7", "line 8"},
+			StatusLine:  "waiting for work in 30s",
+			InputLine:   ">> draft",
+			PromptLabel: ">> ",
 		},
 		nil,
 		nil,
@@ -239,23 +257,48 @@ func TestRunScreenViewKeepsFirstWrappedInputLineVisibleDuringTyping(t *testing.T
 	model.height = 10
 	model.syncLayout()
 
-	for range 15 {
-		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-		model = updated.(runScreenModel)
-	}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model = updated.(runScreenModel)
 
-	if model.input.Height() < 2 {
-		t.Fatalf("expected wrapped input height, got %d", model.input.Height())
+	if model.focus != runScreenFocusViewport {
+		t.Fatalf("expected viewport focus after arrow up, got %v", model.focus)
 	}
+}
 
-	view := model.View()
-	if !strings.Contains(view, "beadhub:bdh:noah> xxxxxxxxxxxx") {
-		t.Fatalf("expected first wrapped line to remain visible, got %q", view)
+func TestRunScreenTypingFromViewportReturnsFocusToInput(t *testing.T) {
+	model := newRunScreenModel(
+		runScreenSnapshot{
+			Lines:       []string{"line 1", "line 2", "line 3", "line 4", "line 5", "line 6", "line 7", "line 8"},
+			StatusLine:  "waiting for work in 30s",
+			InputLine:   ">> draft",
+			PromptLabel: ">> ",
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	model.width = 30
+	model.height = 10
+	model.syncLayout()
+	model.setFocus(runScreenFocusViewport)
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	model = updated.(runScreenModel)
+
+	if model.focus != runScreenFocusInput {
+		t.Fatalf("expected typing to return focus to input, got %v", model.focus)
 	}
+	if model.input.Value() != "draftx" {
+		t.Fatalf("expected typed rune to go into input, got %q", model.input.Value())
+	}
+}
 
-	continuation := "\n" + strings.Repeat(" ", lipgloss.Width(model.promptLabel)) + "xxx"
-	if !strings.Contains(view, continuation) {
-		t.Fatalf("expected wrapped continuation line to remain visible, got %q", view)
+func TestRunScreenWaitingFooterUsesEllipsisStatus(t *testing.T) {
+	if got := runScreenFooterStatus("waiting for work in 30s"); got != "...waiting for work" {
+		t.Fatalf("expected waiting footer status, got %q", got)
 	}
 }
 
@@ -263,8 +306,8 @@ func TestRunScreenExitConfirmationAcceptsYWithoutTypingIntoInput(t *testing.T) {
 	confirmed := false
 	model := newRunScreenModel(
 		runScreenSnapshot{
-			InputLine:   "beadhub:bdh:noah> draft",
-			PromptLabel: "beadhub:bdh:noah> ",
+			InputLine:   ">> draft",
+			PromptLabel: ">> ",
 			ExitConfirm: true,
 		},
 		nil,
@@ -290,8 +333,8 @@ func TestRunScreenExitConfirmationCancelsAndResumesTyping(t *testing.T) {
 	canceled := false
 	model := newRunScreenModel(
 		runScreenSnapshot{
-			InputLine:   "beadhub:bdh:noah> draft",
-			PromptLabel: "beadhub:bdh:noah> ",
+			InputLine:   ">> draft",
+			PromptLabel: ">> ",
 			ExitConfirm: true,
 		},
 		nil,

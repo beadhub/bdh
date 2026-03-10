@@ -18,6 +18,7 @@ type runScreenManager struct {
 	inputFile   *os.File
 	outputFile  *os.File
 	promptLabel string
+	footerID    string
 
 	mu          sync.Mutex
 	lines       []string
@@ -39,14 +40,23 @@ type runScreenSnapshot struct {
 	StatusLine  string
 	InputLine   string
 	PromptLabel string
+	FooterID    string
 	ExitConfirm bool
 }
 
 type runScreenAppendTextMsg string
 type runScreenSetStatusMsg string
 type runScreenSetInputMsg string
+type runScreenSetFooterIDMsg string
 type runScreenSetExitConfirmMsg bool
 type runScreenQuitMsg struct{}
+
+type runScreenFocus int
+
+const (
+	runScreenFocusInput runScreenFocus = iota
+	runScreenFocusViewport
+)
 
 type runScreenModel struct {
 	viewport    viewport.Model
@@ -54,7 +64,9 @@ type runScreenModel struct {
 	width       int
 	height      int
 	promptLabel string
+	footerID    string
 	exitConfirm bool
+	focus       runScreenFocus
 
 	lines      []string
 	current    string
@@ -77,9 +89,13 @@ type runScreenStyles struct {
 	info      lipgloss.Style
 	status    lipgloss.Style
 	hint      lipgloss.Style
+	divider   lipgloss.Style
 }
 
-const runScreenFooterBaseLines = 3
+const (
+	runScreenFooterChromeLines = 2
+	runScreenFixedInputHeight  = 2
+)
 
 func newRunScreenManager(in io.Reader, out io.Writer) *runScreenManager {
 	inputFile, ok := in.(*os.File)
@@ -128,6 +144,7 @@ func (s *runScreenManager) Start() error {
 		tea.WithInput(s.inputFile),
 		tea.WithOutput(s.outputFile),
 		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
 	)
 	s.program = program
 	s.doneCh = doneCh
@@ -250,13 +267,54 @@ func (s *runScreenManager) ClearInputLine() {
 	s.SetInputLine(s.promptLabel)
 }
 
-func (s *runScreenManager) hasActiveProgram() bool {
+func (s *runScreenManager) SetPromptLabel(label string) {
+	if s == nil {
+		return
+	}
+	if strings.TrimSpace(label) == "" {
+		label = defaultRunInputPromptLabel
+	}
+
+	s.mu.Lock()
+	previousPrompt := s.promptLabel
+	s.promptLabel = label
+	if s.inputLine == "" || s.inputLine == defaultRunInputPromptLabel || s.inputLine == previousPrompt {
+		s.inputLine = label
+	}
+	program := s.program
+	s.mu.Unlock()
+
+	if program != nil {
+		program.Send(runScreenSetInputMsg(""))
+	}
+}
+
+func (s *runScreenManager) SetFooterIdentity(identity string) {
+	if s == nil {
+		return
+	}
+
+	s.mu.Lock()
+	s.footerID = strings.TrimSpace(identity)
+	program := s.program
+	s.mu.Unlock()
+
+	if program != nil {
+		program.Send(runScreenSetFooterIDMsg(identity))
+	}
+}
+
+func (s *runScreenManager) HasActiveProgram() bool {
 	if s == nil {
 		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.program != nil
+}
+
+func (s *runScreenManager) hasActiveProgram() bool {
+	return s.HasActiveProgram()
 }
 
 func (s *runScreenManager) snapshotLocked() runScreenSnapshot {
@@ -268,6 +326,7 @@ func (s *runScreenManager) snapshotLocked() runScreenSnapshot {
 		StatusLine:  s.statusLine,
 		InputLine:   s.inputLine,
 		PromptLabel: s.promptLabel,
+		FooterID:    s.footerID,
 		ExitConfirm: s.exitConfirm,
 	}
 }
@@ -368,7 +427,9 @@ func newRunScreenModel(
 		viewport:       viewport.New(0, 0),
 		input:          input,
 		promptLabel:    snapshot.PromptLabel,
+		footerID:       snapshot.FooterID,
 		exitConfirm:    snapshot.ExitConfirm,
+		focus:          runScreenFocusInput,
 		lines:          snapshot.Lines,
 		current:        snapshot.Current,
 		statusLine:     snapshot.StatusLine,
@@ -380,6 +441,7 @@ func newRunScreenModel(
 		onExitConfirm:  onExitConfirm,
 		onExitCancel:   onExitCancel,
 	}
+	model.setFocus(runScreenFocusInput)
 	model.syncViewport(true)
 	return model
 }
@@ -393,9 +455,9 @@ func newRunScreenStyles() runScreenStyles {
 		info:      lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "8"}),
 		status: lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{Light: "236", Dark: "252"}).
-			Background(lipgloss.AdaptiveColor{Light: "252", Dark: "236"}).
-			Padding(0, 1),
-		hint: lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "8"}),
+			Background(lipgloss.AdaptiveColor{Light: "252", Dark: "236"}),
+		hint:    lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "8"}),
+		divider: lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "248", Dark: "239"}),
 	}
 }
 
@@ -424,11 +486,16 @@ func (m runScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncLayout()
 		}
 		return m, nil
+	case runScreenSetFooterIDMsg:
+		m.footerID = strings.TrimSpace(string(typed))
+		return m, nil
 	case runScreenSetExitConfirmMsg:
 		m.exitConfirm = bool(typed)
 		return m, nil
 	case runScreenQuitMsg:
 		return m, tea.Quit
+	case tea.MouseMsg:
+		return m.handleMouse(typed)
 	case tea.KeyMsg:
 		if m.exitConfirm {
 			switch typed.Type {
@@ -482,6 +549,42 @@ func (m runScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.onExitPrompt()
 			}
 			return m, nil
+		case tea.KeyEsc:
+			m.setFocus(runScreenFocusInput)
+			return m, nil
+		}
+
+		if m.focus == runScreenFocusViewport {
+			switch typed.Type {
+			case tea.KeyPgUp, tea.KeyUp, tea.KeyHome, tea.KeyPgDown, tea.KeyEnd:
+				var cmd tea.Cmd
+				m.viewport, cmd = m.viewport.Update(typed)
+				return m, cmd
+			case tea.KeyDown:
+				if m.viewport.AtBottom() {
+					m.setFocus(runScreenFocusInput)
+					return m, nil
+				}
+				var cmd tea.Cmd
+				m.viewport, cmd = m.viewport.Update(typed)
+				return m, cmd
+			case tea.KeyEnter:
+				m.setFocus(runScreenFocusInput)
+				return m, nil
+			default:
+				m.setFocus(runScreenFocusInput)
+			}
+		} else {
+			switch typed.Type {
+			case tea.KeyUp, tea.KeyPgUp, tea.KeyHome:
+				m.setFocus(runScreenFocusViewport)
+				var cmd tea.Cmd
+				m.viewport, cmd = m.viewport.Update(typed)
+				return m, cmd
+			}
+		}
+
+		switch typed.Type {
 		case tea.KeyEnter:
 			if m.onSubmitted != nil {
 				m.onSubmitted(m.input.Value())
@@ -489,10 +592,6 @@ func (m runScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.SetValue("")
 			m.syncLayout()
 			return m, nil
-		case tea.KeyPgUp, tea.KeyPgDown, tea.KeyUp, tea.KeyDown, tea.KeyHome, tea.KeyEnd:
-			var cmd tea.Cmd
-			m.viewport, cmd = m.viewport.Update(typed)
-			return m, cmd
 		}
 
 		previous := m.input.Value()
@@ -517,8 +616,9 @@ func (m runScreenModel) View() string {
 		return ""
 	}
 
-	status := m.styles.status.Width(m.width).Render(m.statusText())
-	return m.viewport.View() + "\n\n" + status + "\n\n" + m.input.View()
+	divider := m.styles.divider.Render(strings.Repeat("─", max(1, m.width)))
+	status := m.styles.status.Width(m.width).Render(m.footerText())
+	return m.viewport.View() + "\n" + divider + "\n" + m.input.View() + "\n" + status
 }
 
 func (m *runScreenModel) syncLayout() {
@@ -527,14 +627,14 @@ func (m *runScreenModel) syncLayout() {
 	}
 
 	m.input.SetWidth(m.width)
-	inputHeight := runInputVisualHeight(m.promptLabel, m.input.Value(), m.width)
-	maxInputHeight := max(1, m.height-runScreenFooterBaseLines-1)
+	maxInputHeight := max(1, m.height-runScreenFooterChromeLines-1)
+	inputHeight := runScreenFixedInputHeight
 	if inputHeight > maxInputHeight {
 		inputHeight = maxInputHeight
 	}
 	m.input.SetHeight(inputHeight)
 
-	outputHeight := m.height - (runScreenFooterBaseLines + inputHeight)
+	outputHeight := m.height - (runScreenFooterChromeLines + inputHeight)
 	if outputHeight < 1 {
 		outputHeight = 1
 	}
@@ -575,6 +675,96 @@ func (m runScreenModel) statusText() string {
 		return ""
 	}
 	return truncateRunText(strings.TrimSpace(m.statusLine), max(1, m.width-2))
+}
+
+func (m *runScreenModel) setFocus(focus runScreenFocus) {
+	m.focus = focus
+	if focus == runScreenFocusViewport {
+		m.input.Blur()
+		return
+	}
+	m.input.Focus()
+}
+
+func (m runScreenModel) footerText() string {
+	left := strings.TrimSpace(m.footerID)
+	right := runScreenFooterStatus(m.statusLine)
+	return runScreenFooterLine(left, right, m.width)
+}
+
+func runScreenFooterStatus(statusLine string) string {
+	status := strings.TrimSpace(statusLine)
+	switch {
+	case status == "":
+		return "running"
+	case strings.HasPrefix(status, "waiting for work"):
+		return "...waiting for work"
+	case strings.HasPrefix(status, "next run"):
+		return "running"
+	default:
+		return status
+	}
+}
+
+func runScreenFooterLine(left string, right string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if right == "" {
+		return truncateRunText(left, width)
+	}
+
+	right = truncateRunText(right, width)
+	rightWidth := lipgloss.Width(right)
+	if rightWidth >= width {
+		return right
+	}
+
+	leftWidth := width - rightWidth - 1
+	if leftWidth < 0 {
+		leftWidth = 0
+	}
+	left = truncateRunText(left, leftWidth)
+	padding := width - lipgloss.Width(left) - rightWidth
+	if padding < 1 {
+		padding = 1
+	}
+	return left + strings.Repeat(" ", padding) + right
+}
+
+func (m runScreenModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionPress {
+		return m, nil
+	}
+
+	if msg.Button == tea.MouseButtonLeft {
+		switch {
+		case m.mouseInViewport(msg.Y):
+			m.setFocus(runScreenFocusViewport)
+		case m.mouseInInput(msg.Y):
+			m.setFocus(runScreenFocusInput)
+		}
+		return m, nil
+	}
+
+	if tea.MouseEvent(msg).IsWheel() && m.mouseInViewport(msg.Y) {
+		m.setFocus(runScreenFocusViewport)
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+func (m runScreenModel) mouseInViewport(y int) bool {
+	return y >= 0 && y < m.viewport.Height
+}
+
+func (m runScreenModel) mouseInInput(y int) bool {
+	start := m.viewport.Height + 1
+	end := start + m.input.Height()
+	return y >= start && y < end
 }
 
 func runInputVisualHeight(promptLabel string, value string, width int) int {

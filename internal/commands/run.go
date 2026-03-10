@@ -163,9 +163,10 @@ Future provider work will add more backends on top of the same loop.`,
 		var wakeStream runWakeStream
 		var awWakeStream awrun.WakeStream
 		inputPromptLabel := defaultRunInputPromptLabel
+		footerIdentity := runStatusIdentityLabel(runProviderName, "", "", "", "")
 		cfg, cfgErr := loadAndValidateConfig()
 		if cfgErr == nil {
-			inputPromptLabel = runIdentityPromptLabel(cfg.ProjectSlug, cfg.CanonicalOrigin, cfg.RepoOrigin, cfg.Alias)
+			footerIdentity = runStatusIdentityLabel(runProviderName, cfg.ProjectSlug, cfg.CanonicalOrigin, cfg.RepoOrigin, cfg.Alias)
 			if awClient, awErr := newAwebClientRequired(cfg.BeadhubURL); awErr == nil {
 				dispatcher = newBeadhubRunDispatcher(cfg, awClient, dispatchDefaults)
 				awWakeStream = awrun.NewClientWakeStream(awClient)
@@ -209,12 +210,13 @@ Future provider work will add more backends on top of the same loop.`,
 		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 		defer stop()
 		if runDebug {
-			return runLegacyRunLoop(cmd, ctx, args, settings, dispatcher, wakeStream, inputPromptLabel, runDebug)
+			return runLegacyRunLoop(cmd, ctx, args, settings, dispatcher, wakeStream, inputPromptLabel, footerIdentity, runDebug)
 		}
 
-		screen := awrun.NewScreenController(cmd.InOrStdin(), cmd.OutOrStdout())
+		screen := newRunScreenManager(cmd.InOrStdin(), cmd.OutOrStdout())
 		if screen != nil {
 			screen.SetPromptLabel(inputPromptLabel)
+			screen.SetFooterIdentity(footerIdentity)
 		}
 
 		provider, err := awrun.NewProvider(runProviderName)
@@ -282,6 +284,7 @@ func runLegacyRunLoop(
 	dispatcher runDispatcher,
 	wakeStream runWakeStream,
 	inputPromptLabel string,
+	footerIdentity string,
 	runDebug bool,
 ) error {
 	provider, err := newRunProvider(runProviderName)
@@ -291,8 +294,8 @@ func runLegacyRunLoop(
 
 	screen := newRunScreenManager(cmd.InOrStdin(), cmd.OutOrStdout())
 	if screen != nil {
-		screen.promptLabel = inputPromptLabel
-		screen.inputLine = inputPromptLabel
+		screen.SetPromptLabel(inputPromptLabel)
+		screen.SetFooterIdentity(footerIdentity)
 	}
 
 	dispatchDefaults := runDispatchDefaults{
@@ -303,6 +306,11 @@ func runLegacyRunLoop(
 		HasCommsPromptSuffix: true,
 	}
 
+	var control runInputController
+	if screen != nil {
+		control = screen
+	}
+
 	loop := &runLoop{
 		provider:         provider,
 		runner:           realRunCommand,
@@ -310,7 +318,7 @@ func runLegacyRunLoop(
 		wakeStream:       wakeStream,
 		now:              time.Now,
 		out:              cmd.OutOrStdout(),
-		control:          screen,
+		control:          control,
 		dispatch:         dispatcher,
 		defaults:         dispatchDefaults,
 		screen:           screen,
@@ -1422,17 +1430,29 @@ func (l *runLoop) promptLabel() string {
 	return l.inputPromptLabel
 }
 
-func runIdentityPromptLabel(projectSlug string, canonicalOrigin string, repoOrigin string, alias string) string {
+func runStatusIdentityLabel(provider string, projectSlug string, canonicalOrigin string, repoOrigin string, alias string) string {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		provider = "provider"
+	}
 	projectSlug = strings.TrimSpace(projectSlug)
 	shortRepo := runShortRepoName(canonicalOrigin, repoOrigin)
 	alias = strings.TrimSpace(alias)
-	if projectSlug == "" || alias == "" {
-		return defaultRunInputPromptLabel
+
+	parts := []string{}
+	if projectSlug != "" {
+		parts = append(parts, projectSlug)
 	}
-	if shortRepo == "" {
-		return projectSlug + ":" + alias + "> "
+	if shortRepo != "" {
+		parts = append(parts, shortRepo)
 	}
-	return projectSlug + ":" + shortRepo + ":" + alias + "> "
+	if alias != "" {
+		parts = append(parts, alias)
+	}
+	if len(parts) == 0 {
+		return "[" + provider + "]"
+	}
+	return "[" + provider + "]@" + strings.Join(parts, ":")
 }
 
 func runShortRepoName(canonicalOrigin string, repoOrigin string) string {

@@ -1,31 +1,32 @@
 package commands
 
-import "strings"
+import (
+	"strings"
 
-type runControlEventType string
-
-const defaultRunInputPromptLabel = "input> "
-
-const (
-	runControlTypingStarted runControlEventType = "typing_started"
-	runControlBufferUpdated runControlEventType = "buffer_updated"
-	runControlPrompt        runControlEventType = "prompt"
-	runControlQuit          runControlEventType = "quit"
-	runControlStop          runControlEventType = "stop"
-	runControlWait          runControlEventType = "wait"
-	runControlResume        runControlEventType = "resume"
-	runControlAutofeedOn    runControlEventType = "autofeed_on"
-	runControlAutofeedOff   runControlEventType = "autofeed_off"
-	runControlInterrupt     runControlEventType = "interrupt"
-	runControlExitPrompt    runControlEventType = "exit_prompt"
-	runControlExitConfirm   runControlEventType = "exit_confirm"
-	runControlExitCancel    runControlEventType = "exit_cancel"
+	awrun "github.com/awebai/aw/run"
 )
 
-type runControlEvent struct {
-	Type runControlEventType
-	Text string
-}
+type runControlEventType = awrun.ControlEventType
+
+const defaultRunInputPromptLabel = ">> "
+
+const (
+	runControlTypingStarted runControlEventType = awrun.ControlTypingStarted
+	runControlBufferUpdated runControlEventType = awrun.ControlBufferUpdated
+	runControlPrompt        runControlEventType = awrun.ControlPrompt
+	runControlQuit          runControlEventType = awrun.ControlQuit
+	runControlStop          runControlEventType = awrun.ControlStop
+	runControlWait          runControlEventType = awrun.ControlWait
+	runControlResume        runControlEventType = awrun.ControlResume
+	runControlAutofeedOn    runControlEventType = awrun.ControlAutofeedOn
+	runControlAutofeedOff   runControlEventType = awrun.ControlAutofeedOff
+	runControlInterrupt     runControlEventType = awrun.ControlInterrupt
+	runControlExitPrompt    runControlEventType = awrun.ControlExitPrompt
+	runControlExitConfirm   runControlEventType = awrun.ControlExitConfirm
+	runControlExitCancel    runControlEventType = awrun.ControlExitCancel
+)
+
+type runControlEvent = awrun.ControlEvent
 
 type runInputController interface {
 	Start() error
