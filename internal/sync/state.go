@@ -90,6 +90,31 @@ func UpdateState(state *SyncState, newHashes map[string]string) {
 	state.IssueHashes = newHashes
 }
 
+// UpdateStateWithConflicts advances successfully synchronized issue hashes
+// while retaining the prior hash for every stale issue rejected by the server.
+// A newly seen conflicted issue is omitted. Either form guarantees the local
+// value is retried instead of being recorded as converged.
+func UpdateStateWithConflicts(state *SyncState, newHashes map[string]string, conflicts []string) {
+	conflictSet := make(map[string]struct{}, len(conflicts))
+	for _, id := range conflicts {
+		conflictSet[id] = struct{}{}
+	}
+
+	nextHashes := make(map[string]string, len(newHashes))
+	for id, hash := range newHashes {
+		if _, conflicted := conflictSet[id]; conflicted {
+			if previous, ok := state.IssueHashes[id]; ok {
+				nextHashes[id] = previous
+			}
+			continue
+		}
+		nextHashes[id] = hash
+	}
+
+	state.LastSync = time.Now().UTC()
+	state.IssueHashes = nextHashes
+}
+
 // NeedsFullSync returns true if a full sync is required.
 // This happens when there's no prior state (empty hashes).
 func NeedsFullSync(state *SyncState) bool {

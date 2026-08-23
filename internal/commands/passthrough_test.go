@@ -984,6 +984,92 @@ esac
 	}
 }
 
+func TestPassthrough_SyncConflictsAreActionableAndStructured(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a sh stub for bd")
+	}
+
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+	os.Chdir(tmpDir)
+
+	setupBeadsDir(t)
+	os.WriteFile(".beads/issues.jsonl", []byte(`{"id":"bd-stale","title":"Local"}`+"\n"), 0644)
+
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	bdPath := filepath.Join(binDir, "bd")
+	script := `#!/bin/sh
+set -e
+case "$1" in
+  create) echo '{"id":"bd-new"}' ;;
+  export) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/bdh/command":
+			json.NewEncoder(w).Encode(map[string]any{"approved": true, "context": map[string]any{}})
+		case "/v1/chat/pending":
+			json.NewEncoder(w).Encode(map[string]any{"pending": []any{}, "messages_waiting": 0})
+		case "/v1/bdh/sync":
+			json.NewEncoder(w).Encode(map[string]any{
+				"synced":          false,
+				"issues_count":    1,
+				"conflicts":       []string{"bd-stale"},
+				"conflicts_count": 1,
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		WorkspaceID:     "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+		BeadhubURL:      server.URL,
+		ProjectSlug:     "test-project",
+		RepoID:          "c3d4e5f6-7890-12cd-ef01-345678901234",
+		RepoOrigin:      "git@github.com:test/repo.git",
+		CanonicalOrigin: "github.com/test/repo",
+		Alias:           "test-agent",
+		HumanName:       "Test Human",
+	}
+	cfg.Save()
+
+	result, err := runPassthrough([]string{"create", "--title", "Test"})
+	if err != nil {
+		t.Fatalf("runPassthrough error: %v", err)
+	}
+	if result.SyncWarning == "" || !strings.Contains(result.SyncWarning, "bd dolt pull") {
+		t.Fatalf("expected actionable sync warning, got %q", result.SyncWarning)
+	}
+	if len(result.SyncConflicts) != 1 || result.SyncConflicts[0] != "bd-stale" {
+		t.Fatalf("sync conflicts were discarded: %#v", result.SyncConflicts)
+	}
+	if !strings.Contains(formatPassthroughOutput(result), "server kept newer data for bd-stale") {
+		t.Fatal("human-readable output omitted sync conflict")
+	}
+
+	result.JSONMode = true
+	var output map[string]any
+	if err := json.Unmarshal([]byte(formatPassthroughOutputJSON(result)), &output); err != nil {
+		t.Fatalf("decode JSON output: %v", err)
+	}
+	conflicts, ok := output["sync_conflicts"].([]any)
+	if !ok || len(conflicts) != 1 || conflicts[0] != "bd-stale" {
+		t.Fatalf("JSON output omitted sync conflicts: %#v", output)
+	}
+}
+
 func TestPassthrough_RequiresBeadhubConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()

@@ -147,9 +147,12 @@ type PassthroughResult struct {
 	BeadsInProgress []client.BeadInProgress
 
 	// From sync
-	SyncWarning string // Warning message from sync attempt
-	SyncStats   *client.SyncStats
-	SyncMode    string // "full" or "incremental"
+	SyncWarning             string // Warning message from sync attempt
+	SyncStats               *client.SyncStats
+	SyncMode                string // "full" or "incremental"
+	SyncConflicts           []string
+	SyncClaimRejected       bool
+	SyncClaimRejectedReason string
 
 	// From auto-reserve
 	AutoReserveWarning   string
@@ -474,6 +477,9 @@ func runPassthrough(args []string) (*PassthroughResult, error) {
 			}
 			result.SyncStats = syncResult.Stats
 			result.SyncMode = syncResult.SyncMode
+			result.SyncConflicts = syncResult.Conflicts
+			result.SyncClaimRejected = syncResult.ClaimRejected
+			result.SyncClaimRejectedReason = syncResult.ClaimRejectedReason
 		}
 
 		// For successful close commands, find related work in progress
@@ -801,8 +807,11 @@ type SyncResult struct {
 	Warning     string
 	IssuesCount int
 	// Sync mode and stats
-	SyncMode string // "full" or "incremental"
-	Stats    *client.SyncStats
+	SyncMode            string // "full" or "incremental"
+	Stats               *client.SyncStats
+	Conflicts           []string
+	ClaimRejected       bool
+	ClaimRejectedReason string
 }
 
 // syncToBeadHub reads issues.jsonl from the beads directory and syncs to BeadHub.
@@ -981,17 +990,45 @@ func syncToBeadHub(cfg *config.Config, bdArgs []string, verbose bool) *SyncResul
 		}
 	}
 
-	// Update sync state on success
+	result.Conflicts = append([]string(nil), resp.Conflicts...)
+	sort.Strings(result.Conflicts)
+	result.ClaimRejected = resp.ClaimRejected
+	result.ClaimRejectedReason = resp.ClaimRejectedReason
+
+	// Advance accepted hashes, but retain retry state for stale conflicts.
 	if resp.SyncProtocolVersion > 0 {
 		syncState.ProtocolVersion = resp.SyncProtocolVersion
 	}
-	sync.UpdateState(syncState, currentHashes)
+	sync.UpdateStateWithConflicts(syncState, currentHashes, result.Conflicts)
 	if err := sync.SaveState(syncStatePath, syncState); err != nil {
 		// Non-fatal: state save failed, next sync will be full
 		result.Warning = "sync succeeded but could not save sync state"
 	}
 
-	result.Synced = resp.Synced
+	if len(result.Conflicts) > 0 {
+		conflictWarning := fmt.Sprintf(
+			"sync incomplete: server kept newer data for %s; run `bd dolt pull`, reconcile, then retry `bdh :force-sync`",
+			strings.Join(result.Conflicts, ", "),
+		)
+		if result.Warning != "" {
+			result.Warning = strings.TrimRight(result.Warning, "\n") + "\n  " + conflictWarning
+		} else {
+			result.Warning = conflictWarning
+		}
+	}
+	if result.ClaimRejected {
+		claimWarning := "claim was not recorded"
+		if result.ClaimRejectedReason != "" {
+			claimWarning += ": " + result.ClaimRejectedReason
+		}
+		if result.Warning != "" {
+			result.Warning = strings.TrimRight(result.Warning, "\n") + "\n  " + claimWarning
+		} else {
+			result.Warning = claimWarning
+		}
+	}
+
+	result.Synced = resp.Synced && len(result.Conflicts) == 0
 	result.IssuesCount = resp.IssuesCount
 	result.Stats = resp.Stats
 
@@ -1373,12 +1410,15 @@ func rewriteBDHelpOutput(output string) string {
 }
 
 type passthroughJSON struct {
-	Rejected        bool              `json:"rejected"`
-	RejectionReason string            `json:"rejection_reason,omitempty"`
-	Warning         string            `json:"warning,omitempty"`
-	SyncWarning     string            `json:"sync_warning,omitempty"`
-	SyncStats       *client.SyncStats `json:"sync_stats,omitempty"`
-	SyncMode        string            `json:"sync_mode,omitempty"`
+	Rejected                bool              `json:"rejected"`
+	RejectionReason         string            `json:"rejection_reason,omitempty"`
+	Warning                 string            `json:"warning,omitempty"`
+	SyncWarning             string            `json:"sync_warning,omitempty"`
+	SyncStats               *client.SyncStats `json:"sync_stats,omitempty"`
+	SyncMode                string            `json:"sync_mode,omitempty"`
+	SyncConflicts           []string          `json:"sync_conflicts,omitempty"`
+	SyncClaimRejected       bool              `json:"sync_claim_rejected,omitempty"`
+	SyncClaimRejectedReason string            `json:"sync_claim_rejected_reason,omitempty"`
 
 	BeadsInProgress []client.BeadInProgress `json:"beads_in_progress,omitempty"`
 
@@ -1447,19 +1487,22 @@ func formatPassthroughOutputJSON(result *PassthroughResult) string {
 	}
 
 	output := passthroughJSON{
-		Rejected:        result.Rejected,
-		RejectionReason: result.RejectionReason,
-		Warning:         result.Warning,
-		SyncWarning:     result.SyncWarning,
-		SyncStats:       result.SyncStats,
-		SyncMode:        result.SyncMode,
-		BeadsInProgress: result.BeadsInProgress,
-		AutoReserve:     autoReserve,
-		BDExitCode:      result.ExitCode,
-		BDStdout:        bdJSON,
-		BDText:          bdText,
-		BDStderr:        strings.TrimSpace(result.Stderr),
-		ReadyContext:    readyContext,
+		Rejected:                result.Rejected,
+		RejectionReason:         result.RejectionReason,
+		Warning:                 result.Warning,
+		SyncWarning:             result.SyncWarning,
+		SyncStats:               result.SyncStats,
+		SyncMode:                result.SyncMode,
+		SyncConflicts:           result.SyncConflicts,
+		SyncClaimRejected:       result.SyncClaimRejected,
+		SyncClaimRejectedReason: result.SyncClaimRejectedReason,
+		BeadsInProgress:         result.BeadsInProgress,
+		AutoReserve:             autoReserve,
+		BDExitCode:              result.ExitCode,
+		BDStdout:                bdJSON,
+		BDText:                  bdText,
+		BDStderr:                strings.TrimSpace(result.Stderr),
+		ReadyContext:            readyContext,
 	}
 
 	data, err := json.MarshalIndent(output, "", "  ")

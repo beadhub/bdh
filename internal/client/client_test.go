@@ -149,8 +149,12 @@ func TestSync(t *testing.T) {
 		}
 
 		resp := SyncResponse{
-			Synced:      true,
-			IssuesCount: 5,
+			Synced:              false,
+			IssuesCount:         5,
+			Conflicts:           []string{"bd-stale"},
+			ConflictsCount:      1,
+			ClaimRejected:       true,
+			ClaimRejectedReason: "bd-2 is held by alice",
 		}
 		json.NewEncoder(w).Encode(resp)
 	}))
@@ -167,11 +171,17 @@ func TestSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Sync() error: %v", err)
 	}
-	if !resp.Synced {
-		t.Error("Expected synced=true")
+	if resp.Synced {
+		t.Error("Expected synced=false for partial response")
 	}
 	if resp.IssuesCount != 5 {
 		t.Errorf("Expected 5 issues, got %d", resp.IssuesCount)
+	}
+	if resp.ConflictsCount != 1 || len(resp.Conflicts) != 1 || resp.Conflicts[0] != "bd-stale" {
+		t.Fatalf("conflicts were not decoded: %#v", resp)
+	}
+	if !resp.ClaimRejected || !strings.Contains(resp.ClaimRejectedReason, "alice") {
+		t.Fatalf("claim rejection was not decoded: %#v", resp)
 	}
 }
 

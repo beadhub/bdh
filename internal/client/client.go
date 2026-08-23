@@ -136,9 +136,13 @@ type SyncStats struct {
 
 // SyncResponse is the response from /v1/bdh/sync.
 type SyncResponse struct {
-	Synced      bool            `json:"synced"`
-	IssuesCount int             `json:"issues_count"`
-	Context     *CommandContext `json:"context,omitempty"`
+	Synced              bool            `json:"synced"`
+	IssuesCount         int             `json:"issues_count"`
+	Context             *CommandContext `json:"context,omitempty"`
+	Conflicts           []string        `json:"conflicts,omitempty"`
+	ConflictsCount      int             `json:"conflicts_count,omitempty"`
+	ClaimRejected       bool            `json:"claim_rejected,omitempty"`
+	ClaimRejectedReason string          `json:"claim_rejected_reason,omitempty"`
 
 	// Detailed sync statistics
 	Stats *SyncStats `json:"stats,omitempty"`

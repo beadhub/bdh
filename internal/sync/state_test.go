@@ -182,6 +182,41 @@ func TestUpdateState(t *testing.T) {
 	}
 }
 
+func TestUpdateStateWithConflictsRetainsRetryState(t *testing.T) {
+	state := &SyncState{
+		IssueHashes: map[string]string{
+			"bd-conflict": "previous-hash",
+			"bd-deleted":  "deleted-hash",
+		},
+	}
+
+	UpdateStateWithConflicts(
+		state,
+		map[string]string{
+			"bd-conflict":     "stale-local-hash",
+			"bd-new-conflict": "new-stale-hash",
+			"bd-success":      "accepted-hash",
+		},
+		[]string{"bd-conflict", "bd-new-conflict"},
+	)
+
+	if got := state.IssueHashes["bd-conflict"]; got != "previous-hash" {
+		t.Fatalf("conflicted prior hash = %q, want previous-hash", got)
+	}
+	if _, ok := state.IssueHashes["bd-new-conflict"]; ok {
+		t.Fatal("new conflicted issue must remain absent so it is retried")
+	}
+	if got := state.IssueHashes["bd-success"]; got != "accepted-hash" {
+		t.Fatalf("successful hash = %q, want accepted-hash", got)
+	}
+	if _, ok := state.IssueHashes["bd-deleted"]; ok {
+		t.Fatal("successfully deleted issue must leave sync state")
+	}
+	if state.LastSync.IsZero() {
+		t.Fatal("partial sync must still record when accepted changes were processed")
+	}
+}
+
 func TestNeedsFullSync(t *testing.T) {
 	tests := []struct {
 		name     string
