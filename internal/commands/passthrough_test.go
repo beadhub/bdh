@@ -1829,6 +1829,16 @@ func TestIsClaimCommand_FromArgs(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "update with --status equals in_progress",
+			args: []string{"update", "bd-42", "--status=in_progress"},
+			want: true,
+		},
+		{
+			name: "explicit open status wins over claim",
+			args: []string{"update", "bd-42", "--claim", "--status", "open"},
+			want: false,
+		},
+		{
 			name: "update with other status",
 			args: []string{"update", "bd-42", "--status", "open"},
 			want: false,

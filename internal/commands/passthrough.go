@@ -730,15 +730,19 @@ func isClaimCommandFromArgs(args []string) bool {
 	if len(args) < 2 || args[0] != "update" {
 		return false
 	}
+	claimRequested := false
 	for i, arg := range args {
 		if arg == "--claim" {
-			return true
+			claimRequested = true
 		}
-		if arg == "--status" && i+1 < len(args) && args[i+1] == "in_progress" {
-			return true
+		if arg == "--status" && i+1 < len(args) {
+			return args[i+1] == "in_progress"
+		}
+		if strings.HasPrefix(arg, "--status=") {
+			return strings.TrimPrefix(arg, "--status=") == "in_progress"
 		}
 	}
-	return false
+	return claimRequested
 }
 
 // isWorkspaceRecentlyActive checks if a workspace was active after the given threshold.
